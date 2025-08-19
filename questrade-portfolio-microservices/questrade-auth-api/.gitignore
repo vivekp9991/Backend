@@ -1,0 +1,11 @@
+node_modules/
+
+package-lock.json
+
+.env
+
+
+/logs
+
+combined.log
+error.log
