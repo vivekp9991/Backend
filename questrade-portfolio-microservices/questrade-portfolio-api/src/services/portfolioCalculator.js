@@ -70,7 +70,18 @@ class PortfolioCalculator {
           value: acc.summary?.totalEquityCAD || 0,
           cash: acc.summary?.cashCAD || 0
         })),
-        holdings: holdings,
+        holdings: {
+          count: holdings.count,
+          totalValue: holdings.totalValue,
+          holdings: holdings.holdings,
+          topHoldings: holdings.topHoldings.map(h => ({
+            symbol: h.symbol,
+            value: h.marketValue,
+            percentage: h.percentage,
+            quantity: h.quantity,
+            marketValue: h.marketValue
+          }))
+        },
         recentActivity: activities.slice(0, 10).map(activity => ({
           date: activity.transactionDate,
           type: activity.type,
@@ -247,11 +258,11 @@ class PortfolioCalculator {
           value: h.marketValue,
           percentage: h.percentage
         })),
-        // FIXED: Ensure accountBreakdown is properly formatted as array of objects
+        // Ensure accountBreakdown is properly formatted as array of objects
         accountBreakdown: accounts.map(acc => ({
-          accountId: String(acc.accountId), // Ensure it's a string
-          type: String(acc.type || 'Unknown'), // Ensure it's a string with fallback
-          value: Number(acc.summary?.totalEquityCAD || 0), // Ensure it's a number
+          accountId: String(acc.accountId),
+          type: String(acc.type || 'Unknown'),
+          value: Number(acc.summary?.totalEquityCAD || 0),
           percentage: portfolioValue.totalValueCAD > 0 
             ? Number(((acc.summary?.totalEquityCAD || 0) / portfolioValue.totalValueCAD) * 100)
             : 0

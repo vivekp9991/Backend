@@ -310,7 +310,8 @@ class PortfolioAPISetup {
         if (portfolio.holdings.topHoldings && portfolio.holdings.topHoldings.length > 0) {
           console.log('\n  Top Holdings:');
           portfolio.holdings.topHoldings.slice(0, 5).forEach(holding => {
-            console.log(`    ${holding.symbol}: $${holding.value?.toFixed(2)} (${holding.percentage?.toFixed(1)}%)`);
+            const value = holding.value || holding.marketValue || 0;
+            console.log(`    ${holding.symbol}: $${value.toFixed(2)} (${holding.percentage?.toFixed(1)}%)`);
           });
         }
       }
