@@ -53,12 +53,24 @@ const portfolioSnapshotSchema = new mongoose.Schema({
     percentage: Number
   }],
   
-  // Account breakdown
+  // Account breakdown - FIXED: Changed from array of strings to array of objects
   accountBreakdown: [{
-    accountId: String,
-    type: String,
-    value: Number,
-    percentage: Number
+    accountId: {
+      type: String,
+      required: true
+    },
+    type: {
+      type: String,
+      required: true
+    },
+    value: {
+      type: Number,
+      required: true
+    },
+    percentage: {
+      type: Number,
+      required: true
+    }
   }],
   
   // Asset allocation

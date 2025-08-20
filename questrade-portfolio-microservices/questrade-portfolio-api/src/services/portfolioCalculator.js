@@ -232,7 +232,7 @@ class PortfolioCalculator {
         ? (portfolioValue.totalMarketValue / portfolioValue.totalValueCAD) * 100 
         : 0;
 
-      // Create snapshot
+      // Create snapshot with properly formatted accountBreakdown
       const snapshot = new PortfolioSnapshot({
         personName,
         snapshotDate: new Date(),
@@ -247,12 +247,13 @@ class PortfolioCalculator {
           value: h.marketValue,
           percentage: h.percentage
         })),
+        // FIXED: Ensure accountBreakdown is properly formatted as array of objects
         accountBreakdown: accounts.map(acc => ({
-          accountId: acc.accountId,
-          type: acc.type,
-          value: acc.summary?.totalEquityCAD || 0,
+          accountId: String(acc.accountId), // Ensure it's a string
+          type: String(acc.type || 'Unknown'), // Ensure it's a string with fallback
+          value: Number(acc.summary?.totalEquityCAD || 0), // Ensure it's a number
           percentage: portfolioValue.totalValueCAD > 0 
-            ? ((acc.summary?.totalEquityCAD || 0) / portfolioValue.totalValueCAD) * 100 
+            ? Number(((acc.summary?.totalEquityCAD || 0) / portfolioValue.totalValueCAD) * 100)
             : 0
         })),
         assetAllocation: {
