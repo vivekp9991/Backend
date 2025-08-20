@@ -44,6 +44,7 @@ router.get('/:personName', asyncHandler(async (req, res) => {
 }));
 
 // Create new person
+// Create new person
 router.post('/', asyncHandler(async (req, res) => {
   const { personName, refreshToken, displayName, email, phoneNumber } = req.body;
   
@@ -56,28 +57,31 @@ router.post('/', asyncHandler(async (req, res) => {
 
   // Check if person already exists
   const existingPerson = await Person.findOne({ personName });
-  if (existingPerson) {
+  if (existingPerson && existingPerson.isActive) {
     return res.status(400).json({
       success: false,
       error: 'Person already exists'
     });
   }
 
-  // Setup token first
+  // Setup token first (this will create/update the person record)
   await tokenManager.setupPersonToken(personName, refreshToken);
   
-  // Create person record
-  const person = await Person.create({
-    personName,
-    displayName: displayName || personName,
-    email,
-    phoneNumber,
-    hasValidToken: true,
-    lastTokenRefresh: new Date(),
-    isActive: true
-  });
+  // Update the person record with additional details
+  const person = await Person.findOneAndUpdate(
+    { personName },
+    {
+      displayName: displayName || personName,
+      email,
+      phoneNumber,
+      hasValidToken: true,
+      lastTokenRefresh: new Date(),
+      isActive: true
+    },
+    { new: true, runValidators: true }
+  );
 
-  logger.info(`Person created: ${personName}`);
+  logger.info(`Person created/updated: ${personName}`);
   
   res.status(201).json({
     success: true,

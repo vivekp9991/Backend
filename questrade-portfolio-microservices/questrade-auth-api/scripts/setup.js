@@ -20,7 +20,7 @@ function question(prompt) {
 class AuthAPISetup {
   constructor() {
     this.mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/questrade_auth';
-    this.apiUrl = `http://localhost:${process.env.PORT || 3001}/api`;
+    this.apiUrl = `http://localhost:${process.env.PORT || 4001}/api`;
   }
 
   async connectDatabase() {
@@ -76,47 +76,72 @@ class AuthAPISetup {
     return choice.trim();
   }
 
-  async addNewPerson() {
-    console.log('\n=== Add New Person ===');
-    
-    const personName = await question('Enter person name: ');
-    if (!personName.trim()) {
-      console.log('❌ Person name cannot be empty');
-      return;
-    }
+async addNewPerson() {
+  console.log('\n=== Add New Person ===');
+  
+  const personName = await question('Enter person name: ');
+  if (!personName.trim()) {
+    console.log('❌ Person name cannot be empty');
+    return;
+  }
 
-    const displayName = await question('Enter display name (optional): ');
-    const email = await question('Enter email (optional): ');
-    
-    console.log('\nGet your refresh token from:');
-    console.log('https://login.questrade.com/APIAccess/UserApps.aspx');
-    const refreshToken = await question('Enter Questrade refresh token: ');
-    
-    if (!refreshToken.trim()) {
-      console.log('❌ Refresh token cannot be empty');
-      return;
-    }
-
-    try {
-      console.log('\n⏳ Setting up person and validating token...');
-      
-      const response = await axios.post(`${this.apiUrl}/persons`, {
-        personName: personName.trim(),
-        displayName: displayName.trim() || personName.trim(),
-        email: email.trim(),
-        refreshToken: refreshToken.trim()
-      });
-
-      if (response.data.success) {
-        console.log('✅ Person created successfully!');
-        console.log(`   Name: ${response.data.data.personName}`);
-        console.log(`   Display: ${response.data.data.displayName}`);
-        console.log(`   Token Status: Valid`);
+  // Check if person already exists
+  try {
+    const checkResponse = await axios.get(`${this.apiUrl}/persons/${personName.trim()}`);
+    if (checkResponse.data.success) {
+      console.log(`❌ Person "${personName}" already exists`);
+      const updateToken = await question('Would you like to update their token instead? (yes/no): ');
+      if (updateToken.toLowerCase() === 'yes') {
+        return await this.updatePersonToken();
       }
-    } catch (error) {
+      return;
+    }
+  } catch (error) {
+    // Person doesn't exist, continue with creation
+  }
+
+  const displayName = await question('Enter display name (optional): ');
+  const email = await question('Enter email (optional): ');
+  
+  console.log('\nGet your refresh token from:');
+  console.log('https://login.questrade.com/APIAccess/UserApps.aspx');
+  const refreshToken = await question('Enter Questrade refresh token: ');
+  
+  if (!refreshToken.trim()) {
+    console.log('❌ Refresh token cannot be empty');
+    return;
+  }
+
+  try {
+    console.log('\n⏳ Setting up person and validating token...');
+    
+    const response = await axios.post(`${this.apiUrl}/persons`, {
+      personName: personName.trim(),
+      displayName: displayName.trim() || personName.trim(),
+      email: email.trim(),
+      refreshToken: refreshToken.trim()
+    });
+
+    if (response.data.success) {
+      console.log('✅ Person created successfully!');
+      console.log(`   Name: ${response.data.data.personName}`);
+      console.log(`   Display: ${response.data.data.displayName}`);
+      console.log(`   Token Status: Valid`);
+      
+      // Test the connection
+      const testConnection = await question('\nWould you like to test the connection? (yes/no): ');
+      if (testConnection.toLowerCase() === 'yes') {
+        await this.testConnection();
+      }
+    }
+  } catch (error) {
+    if (error.response?.data?.error?.includes('already exists')) {
+      console.log('❌ Person already exists. Use option 4 to update their token.');
+    } else {
       console.log('❌ Failed to create person:', error.response?.data?.error || error.message);
     }
   }
+}
 
   async listPersons() {
     console.log('\n=== All Persons ===');
