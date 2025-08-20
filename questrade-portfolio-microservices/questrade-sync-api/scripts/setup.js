@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 const mongoose = require('mongoose');
 const readline = require('readline');
 const axios = require('axios');

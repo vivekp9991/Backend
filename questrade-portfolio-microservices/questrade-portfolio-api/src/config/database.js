@@ -1,4 +1,4 @@
-/ src/config/database.js
+// src/config/database.js
 const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 
