@@ -1,334 +1,322 @@
-// src/services/performanceCalculator.js
-const mongoose = require('mongoose');
-const Decimal = require('decimal.js');
-const moment = require('moment');
+const axios = require('axios');
 const logger = require('../utils/logger');
 
-const Activity = mongoose.model('Activity');
-const PortfolioSnapshot = require('../models/PortfolioSnapshot');
-const PerformanceHistory = require('../models/PerformanceHistory');
-
 class PerformanceCalculator {
-  // Get date range based on period
-  getDateRange(period) {
-    const endDate = new Date();
-    let startDate = new Date();
-    
-    switch(period) {
-      case '1D':
-        startDate.setDate(startDate.getDate() - 1);
-        break;
-      case '1W':
-        startDate.setDate(startDate.getDate() - 7);
-        break;
-      case '1M':
-        startDate.setMonth(startDate.getMonth() - 1);
-        break;
-      case '3M':
-        startDate.setMonth(startDate.getMonth() - 3);
-        break;
-      case '6M':
-        startDate.setMonth(startDate.getMonth() - 6);
-        break;
-      case '1Y':
-        startDate.setFullYear(startDate.getFullYear() - 1);
-        break;
-      case 'YTD':
-        startDate = new Date(startDate.getFullYear(), 0, 1);
-        break;
-      case 'ALL':
-        startDate = new Date(2000, 0, 1); // Far back date
-        break;
-    }
-    
-    return { startDate, endDate };
+  constructor() {
+    // Get Sync API URL from environment or use default
+    this.syncApiUrl = process.env.SYNC_API_URL || 'http://localhost:3001/api';
   }
-  
-  async calculateReturns(personName, period = '1Y') {
+
+  /**
+   * Make HTTP request to Sync API
+   */
+  async fetchFromSyncApi(endpoint, params = {}) {
     try {
-      const { startDate, endDate } = this.getDateRange(period);
+      const response = await axios.get(`${this.syncApiUrl}${endpoint}`, { params });
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching from Sync API ${endpoint}:`, error.message);
+      throw new Error(`Failed to fetch data from Sync API: ${error.message}`);
+    }
+  }
+
+  /**
+   * Calculate performance metrics for a given time period
+   * @param {String} accountId - Account ID (optional)
+   * @param {String} personName - Person name (optional)
+   * @param {Date} startDate - Start date for calculation
+   * @param {Date} endDate - End date for calculation
+   */
+  async calculatePerformance(accountId = null, personName = null, startDate = null, endDate = null) {
+    try {
+      // Prepare query parameters
+      const params = {};
+      if (accountId) params.accountId = accountId;
+      if (personName) params.personName = personName;
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+
+      // Fetch data from Sync API
+      const [positions, balances, activities] = await Promise.all([
+        this.fetchFromSyncApi('/positions', params),
+        this.fetchFromSyncApi('/balances', params),
+        this.fetchFromSyncApi('/activities', params)
+      ]);
+
+      // Calculate metrics
+      const metrics = {
+        totalValue: this.calculateTotalValue(balances),
+        totalCost: this.calculateTotalCost(positions),
+        totalGainLoss: 0,
+        totalGainLossPercent: 0,
+        realizedGainLoss: this.calculateRealizedGainLoss(activities),
+        unrealizedGainLoss: this.calculateUnrealizedGainLoss(positions),
+        totalDividends: this.calculateTotalDividends(activities),
+        totalCommissions: this.calculateTotalCommissions(activities),
+        numberOfTrades: this.countTrades(activities),
+        topPerformers: this.getTopPerformers(positions, 5),
+        worstPerformers: this.getWorstPerformers(positions, 5),
+        positionCount: positions.length,
+        accountCount: [...new Set(positions.map(p => p.accountId))].length
+      };
+
+      // Calculate total gain/loss
+      metrics.totalGainLoss = metrics.realizedGainLoss + metrics.unrealizedGainLoss;
       
-      // Get snapshots for the period
-      const snapshots = await PortfolioSnapshot.getDateRange(
-        personName,
-        startDate,
-        endDate
-      );
-      
-      if (!snapshots || snapshots.length < 2) {
-        return {
-          period,
-          startDate,
-          endDate,
-          absoluteReturn: 0,
-          percentageReturn: 0,
-          message: 'Insufficient data for period'
-        };
+      // Calculate total gain/loss percentage
+      if (metrics.totalCost > 0) {
+        metrics.totalGainLossPercent = (metrics.totalGainLoss / metrics.totalCost) * 100;
       }
-      
-      const firstSnapshot = snapshots[0];
-      const lastSnapshot = snapshots[snapshots.length - 1];
-      
-      const startValue = new Decimal(firstSnapshot.totalValueCAD);
-      const endValue = new Decimal(lastSnapshot.totalValueCAD);
-      
-      // Get cash flows for the period
-      const cashFlows = await this.getCashFlows(personName, startDate, endDate);
-      
-      // Simple return calculation
-      const simpleReturn = endValue.minus(startValue).minus(cashFlows.net);
-      const simpleReturnPercent = startValue.gt(0)
-        ? simpleReturn.div(startValue).mul(100)
-        : new Decimal(0);
-      
-      // Time-weighted return
-      const twr = await this.calculateTWR(snapshots, cashFlows.flows);
-      
-      // Money-weighted return
-      const mwr = await this.calculateMWR(
-        startValue.toNumber(),
-        endValue.toNumber(),
-        cashFlows.flows
-      );
+
+      return metrics;
+    } catch (error) {
+      logger.error('Error calculating performance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate total portfolio value
+   */
+  calculateTotalValue(balances) {
+    if (!Array.isArray(balances)) return 0;
+    return balances.reduce((total, balance) => {
+      return total + (balance.totalEquity || 0);
+    }, 0);
+  }
+
+  /**
+   * Calculate total cost basis
+   */
+  calculateTotalCost(positions) {
+    if (!Array.isArray(positions)) return 0;
+    return positions.reduce((total, position) => {
+      return total + (position.totalCost || 0);
+    }, 0);
+  }
+
+  /**
+   * Calculate realized gain/loss from activities
+   */
+  calculateRealizedGainLoss(activities) {
+    if (!Array.isArray(activities)) return 0;
+    const sellActivities = activities.filter(a => a.type === 'Sell');
+    return sellActivities.reduce((total, activity) => {
+      // This is a simplified calculation
+      // In reality, you'd need to match buys and sells for accurate calculation
+      return total + (activity.netAmount || 0);
+    }, 0);
+  }
+
+  /**
+   * Calculate unrealized gain/loss from current positions
+   */
+  calculateUnrealizedGainLoss(positions) {
+    if (!Array.isArray(positions)) return 0;
+    return positions.reduce((total, position) => {
+      const marketValue = position.currentMarketValue || 0;
+      const cost = position.totalCost || 0;
+      return total + (marketValue - cost);
+    }, 0);
+  }
+
+  /**
+   * Calculate total dividends received
+   */
+  calculateTotalDividends(activities) {
+    if (!Array.isArray(activities)) return 0;
+    const dividendActivities = activities.filter(a => a.type === 'Dividend');
+    return dividendActivities.reduce((total, activity) => {
+      return total + Math.abs(activity.netAmount || activity.grossAmount || 0);
+    }, 0);
+  }
+
+  /**
+   * Calculate total commissions paid
+   */
+  calculateTotalCommissions(activities) {
+    if (!Array.isArray(activities)) return 0;
+    return activities.reduce((total, activity) => {
+      return total + Math.abs(activity.commission || 0);
+    }, 0);
+  }
+
+  /**
+   * Count number of trades
+   */
+  countTrades(activities) {
+    if (!Array.isArray(activities)) return 0;
+    return activities.filter(a => ['Buy', 'Sell'].includes(a.type)).length;
+  }
+
+  /**
+   * Get top performing positions
+   */
+  getTopPerformers(positions, limit = 5) {
+    if (!Array.isArray(positions)) return [];
+    
+    const positionsWithGainLoss = positions.map(position => {
+      const marketValue = position.currentMarketValue || 0;
+      const cost = position.totalCost || 0;
+      const gainLoss = marketValue - cost;
+      const gainLossPercent = cost > 0 ? (gainLoss / cost) * 100 : 0;
       
       return {
-        period,
-        startDate,
-        endDate,
-        startValue: startValue.toNumber(),
-        endValue: endValue.toNumber(),
-        absoluteReturn: simpleReturn.toNumber(),
-        percentageReturn: simpleReturnPercent.toNumber(),
-        timeWeightedReturn: twr,
-        moneyWeightedReturn: mwr,
-        cashFlows: cashFlows.total,
-        deposits: cashFlows.deposits,
-        withdrawals: cashFlows.withdrawals
+        symbol: position.symbol,
+        quantity: position.openQuantity,
+        marketValue,
+        cost,
+        gainLoss,
+        gainLossPercent
       };
-    } catch (error) {
-      logger.error(`Error calculating returns for ${personName}:`, error);
-      throw error;
-    }
-  }
-  
-  async getCashFlows(personName, startDate, endDate) {
-    const activities = await Activity.find({
-      personName,
-      transactionDate: {
-        $gte: startDate,
-        $lte: endDate
-      },
-      type: { $in: ['Deposit', 'Withdrawal', 'Transfer'] }
     });
+
+    return positionsWithGainLoss
+      .sort((a, b) => b.gainLossPercent - a.gainLossPercent)
+      .slice(0, limit);
+  }
+
+  /**
+   * Get worst performing positions
+   */
+  getWorstPerformers(positions, limit = 5) {
+    if (!Array.isArray(positions)) return [];
     
-    let deposits = new Decimal(0);
-    let withdrawals = new Decimal(0);
-    const flows = [];
-    
-    activities.forEach(activity => {
-      const amount = Math.abs(activity.netAmount || 0);
-      const date = activity.transactionDate;
+    const positionsWithGainLoss = positions.map(position => {
+      const marketValue = position.currentMarketValue || 0;
+      const cost = position.totalCost || 0;
+      const gainLoss = marketValue - cost;
+      const gainLossPercent = cost > 0 ? (gainLoss / cost) * 100 : 0;
       
-      if (activity.type === 'Deposit') {
-        deposits = deposits.plus(amount);
-        flows.push({ date, amount });
-      } else if (activity.type === 'Withdrawal') {
-        withdrawals = withdrawals.plus(amount);
-        flows.push({ date, amount: -amount });
-      }
+      return {
+        symbol: position.symbol,
+        quantity: position.openQuantity,
+        marketValue,
+        cost,
+        gainLoss,
+        gainLossPercent
+      };
     });
-    
-    return {
-      deposits: deposits.toNumber(),
-      withdrawals: withdrawals.toNumber(),
-      net: deposits.minus(withdrawals).toNumber(),
-      total: deposits.plus(withdrawals).toNumber(),
-      flows
-    };
+
+    return positionsWithGainLoss
+      .sort((a, b) => a.gainLossPercent - b.gainLossPercent)
+      .slice(0, limit);
   }
-  
-  async calculateTWR(snapshots, cashFlows) {
-    // Time-weighted return calculation
-    // TWR = [(1 + R1) × (1 + R2) × ... × (1 + Rn)] - 1
-    
-    let twr = new Decimal(1);
-    
-    for (let i = 1; i < snapshots.length; i++) {
-      const prevSnapshot = snapshots[i - 1];
-      const currSnapshot = snapshots[i];
-      
-      // Find cash flows between snapshots
-      const periodFlows = cashFlows.filter(flow =>
-        flow.date > prevSnapshot.snapshotDate &&
-        flow.date <= currSnapshot.snapshotDate
-      );
-      
-      const periodFlowAmount = periodFlows.reduce(
-        (sum, flow) => sum + flow.amount,
-        0
-      );
-      
-      const startValue = prevSnapshot.totalValueCAD;
-      const endValue = currSnapshot.totalValueCAD;
-      const adjustedStartValue = startValue + periodFlowAmount / 2; // Mid-point assumption
-      
-      if (adjustedStartValue > 0) {
-        const periodReturn = (endValue - periodFlowAmount) / adjustedStartValue;
-        twr = twr.mul(1 + periodReturn);
-      }
-    }
-    
-    return twr.minus(1).mul(100).toNumber();
-  }
-  
-  async calculateMWR(startValue, endValue, cashFlows) {
-    // Money-weighted return (IRR) calculation
-    // This is a simplified implementation
-    // For production, use a proper IRR calculation library
-    
-    if (cashFlows.length === 0) {
-      return ((endValue - startValue) / startValue) * 100;
-    }
-    
-    // Simple approximation for MWR
-    const totalInflows = cashFlows
-      .filter(f => f.amount > 0)
-      .reduce((sum, f) => sum + f.amount, 0);
-    
-    const totalOutflows = Math.abs(
-      cashFlows
-        .filter(f => f.amount < 0)
-        .reduce((sum, f) => sum + f.amount, 0)
-    );
-    
-    const netCashFlow = totalInflows - totalOutflows;
-    const averageCapital = (startValue + endValue + netCashFlow) / 2;
-    
-    if (averageCapital > 0) {
-      const gain = endValue - startValue - netCashFlow;
-      return (gain / averageCapital) * 100;
-    }
-    
-    return 0;
-  }
-  
-  async getHistoricalPerformance(personName, startDate, endDate, interval = 'daily') {
+
+  /**
+   * Calculate daily returns
+   */
+  async calculateDailyReturns(accountId = null, personName = null, days = 30) {
     try {
-      const snapshots = await PortfolioSnapshot.getDateRange(
-        personName,
-        startDate,
-        endDate
-      );
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      const params = {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      };
+      if (accountId) params.accountId = accountId;
+      if (personName) params.personName = personName;
+
+      // Fetch historical data from Sync API
+      const historicalData = await this.fetchFromSyncApi('/historical-balances', params);
       
-      if (!snapshots || snapshots.length === 0) {
+      if (!historicalData || historicalData.length === 0) {
+        logger.info('No historical balance data available');
         return [];
       }
-      
-      const performance = [];
-      let previousValue = snapshots[0].totalValueCAD;
-      
-      for (let i = 1; i < snapshots.length; i++) {
-        const snapshot = snapshots[i];
-        const currentValue = snapshot.totalValueCAD;
-        
-        const dailyReturn = previousValue > 0
-          ? ((currentValue - previousValue) / previousValue) * 100
-          : 0;
-        
-        performance.push({
-          date: snapshot.snapshotDate,
-          value: currentValue,
-          dailyReturn,
-          cumulativeReturn: 0 // Will calculate
-        });
-        
-        previousValue = currentValue;
-      }
-      
-      // Calculate cumulative returns
-      let cumulativeMultiplier = 1;
-      performance.forEach(p => {
-        cumulativeMultiplier *= (1 + p.dailyReturn / 100);
-        p.cumulativeReturn = (cumulativeMultiplier - 1) * 100;
-      });
-      
-      // Aggregate by interval if needed
-      if (interval !== 'daily') {
-        return this.aggregatePerformance(performance, interval);
-      }
-      
-      return performance;
-    } catch (error) {
-      logger.error(`Error getting historical performance for ${personName}:`, error);
-      throw error;
-    }
-  }
-  
-  aggregatePerformance(dailyPerformance, interval) {
-    const aggregated = [];
-    let currentPeriod = [];
-    
-    dailyPerformance.forEach(day => {
-      const date = moment(day.date);
-      
-      // Check if we need to start a new period
-      let startNewPeriod = false;
-      
-      if (currentPeriod.length === 0) {
-        startNewPeriod = true;
-      } else {
-        const lastDate = moment(currentPeriod[currentPeriod.length - 1].date);
-        
-        switch(interval) {
-          case 'weekly':
-            startNewPeriod = !date.isSame(lastDate, 'week');
-            break;
-          case 'monthly':
-            startNewPeriod = !date.isSame(lastDate, 'month');
-            break;
-          case 'quarterly':
-            startNewPeriod = !date.isSame(lastDate, 'quarter');
-            break;
-          case 'yearly':
-            startNewPeriod = !date.isSame(lastDate, 'year');
-            break;
+
+      // Calculate daily returns
+      const returns = [];
+      for (let i = 1; i < historicalData.length; i++) {
+        const prevValue = historicalData[i - 1].totalEquity;
+        const currValue = historicalData[i].totalEquity;
+        if (prevValue > 0) {
+          const dailyReturn = ((currValue - prevValue) / prevValue) * 100;
+          returns.push({
+            date: historicalData[i].date,
+            return: dailyReturn,
+            value: currValue
+          });
         }
       }
-      
-      if (startNewPeriod && currentPeriod.length > 0) {
-        // Aggregate current period
-        const periodStart = currentPeriod[0];
-        const periodEnd = currentPeriod[currentPeriod.length - 1];
-        
-        aggregated.push({
-          date: periodEnd.date,
-          startDate: periodStart.date,
-          value: periodEnd.value,
-          periodReturn: periodEnd.cumulativeReturn - (periodStart.cumulativeReturn || 0),
-          cumulativeReturn: periodEnd.cumulativeReturn
-        });
-        
-        currentPeriod = [];
-      }
-      
-      currentPeriod.push(day);
-    });
-    
-    // Don't forget the last period
-    if (currentPeriod.length > 0) {
-      const periodStart = currentPeriod[0];
-      const periodEnd = currentPeriod[currentPeriod.length - 1];
-      
-      aggregated.push({
-        date: periodEnd.date,
-        startDate: periodStart.date,
-        value: periodEnd.value,
-        periodReturn: periodEnd.cumulativeReturn - (periodStart.cumulativeReturn || 0),
-        cumulativeReturn: periodEnd.cumulativeReturn
-      });
+
+      return returns;
+    } catch (error) {
+      logger.error('Error calculating daily returns:', error);
+      return [];
     }
-    
-    return aggregated;
+  }
+
+  /**
+   * Calculate Sharpe ratio (simplified)
+   */
+  async calculateSharpeRatio(returns, riskFreeRate = 0.02) {
+    if (!returns || returns.length === 0) {
+      return 0;
+    }
+
+    const returnValues = returns.map(r => r.return || 0);
+    const avgReturn = returnValues.reduce((a, b) => a + b, 0) / returnValues.length;
+    const variance = returnValues.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returnValues.length;
+    const stdDev = Math.sqrt(variance);
+
+    if (stdDev === 0) return 0;
+
+    return (avgReturn - riskFreeRate) / stdDev;
+  }
+
+  /**
+   * Calculate portfolio allocation
+   */
+  async calculateAllocation(accountId = null, personName = null) {
+    try {
+      const params = {};
+      if (accountId) params.accountId = accountId;
+      if (personName) params.personName = personName;
+
+      const positions = await this.fetchFromSyncApi('/positions', params);
+      
+      if (!positions || positions.length === 0) {
+        return [];
+      }
+
+      const totalValue = positions.reduce((sum, p) => sum + (p.currentMarketValue || 0), 0);
+      
+      if (totalValue === 0) {
+        return [];
+      }
+
+      const allocation = positions.map(position => ({
+        symbol: position.symbol,
+        value: position.currentMarketValue || 0,
+        percentage: ((position.currentMarketValue || 0) / totalValue) * 100,
+        quantity: position.openQuantity
+      }));
+
+      return allocation.sort((a, b) => b.percentage - a.percentage);
+    } catch (error) {
+      logger.error('Error calculating allocation:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get performance summary
+   */
+  async getPerformanceSummary(personName = null) {
+    try {
+      const params = personName ? { personName } : {};
+      
+      // Fetch summary from Sync API
+      const summary = await this.fetchFromSyncApi('/summary', params);
+      
+      return summary;
+    } catch (error) {
+      logger.error('Error fetching performance summary:', error);
+      throw error;
+    }
   }
 }
 
