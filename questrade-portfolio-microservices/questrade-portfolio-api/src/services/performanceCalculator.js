@@ -1,10 +1,14 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
+const PortfolioSnapshot = require('../models/PortfolioSnapshot');
+const PerformanceHistory = require('../models/PerformanceHistory');
+const Decimal = require('decimal.js');
+const moment = require('moment');
 
 class PerformanceCalculator {
   constructor() {
     // Get Sync API URL from environment or use default
-    this.syncApiUrl = process.env.SYNC_API_URL || 'http://localhost:3001/api';
+    this.syncApiUrl = process.env.SYNC_API_URL || 'http://localhost:4002/api';
   }
 
   /**
@@ -18,6 +22,358 @@ class PerformanceCalculator {
       logger.error(`Error fetching from Sync API ${endpoint}:`, error.message);
       throw new Error(`Failed to fetch data from Sync API: ${error.message}`);
     }
+  }
+
+  /**
+   * Calculate returns for a specific period
+   */
+  async calculateReturns(personName, period = '1Y') {
+    try {
+      const dateHelpers = require('../utils/dateHelpers');
+      const startDate = dateHelpers.getPeriodStartDate(period);
+      const endDate = new Date();
+
+      // Get portfolio values at start and end
+      const [startSnapshot, endSnapshot] = await Promise.all([
+        PortfolioSnapshot.findOne({ 
+          personName, 
+          snapshotDate: { $gte: startDate } 
+        }).sort({ snapshotDate: 1 }),
+        PortfolioSnapshot.getLatest(personName)
+      ]);
+
+      if (!startSnapshot || !endSnapshot) {
+        // Fallback to current data if no snapshots
+        const currentValue = await this.getCurrentPortfolioValue(personName);
+        
+        return {
+          period,
+          startDate,
+          endDate,
+          startValue: currentValue,
+          endValue: currentValue,
+          absoluteReturn: 0,
+          percentageReturn: 0,
+          timeWeightedReturn: 0,
+          moneyWeightedReturn: 0,
+          message: 'Insufficient historical data for accurate calculation'
+        };
+      }
+
+      const startValue = startSnapshot.totalValueCAD;
+      const endValue = endSnapshot.totalValueCAD;
+      const absoluteReturn = endValue - startValue;
+      const percentageReturn = startValue > 0 ? (absoluteReturn / startValue) * 100 : 0;
+
+      // Calculate TWR and MWR
+      const [twr, mwr] = await Promise.all([
+        this.calculateTimeWeightedReturn(personName, startDate, endDate),
+        this.calculateMoneyWeightedReturn(personName, startDate, endDate)
+      ]);
+
+      return {
+        period,
+        startDate,
+        endDate,
+        startValue,
+        endValue,
+        absoluteReturn,
+        percentageReturn,
+        timeWeightedReturn: twr,
+        moneyWeightedReturn: mwr,
+        annualizedReturn: this.annualizeReturn(percentageReturn / 100, startDate, endDate) * 100
+      };
+    } catch (error) {
+      logger.error(`Error calculating returns for ${personName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get current portfolio value
+   */
+  async getCurrentPortfolioValue(personName) {
+    try {
+      const params = { personName };
+      const accountsResponse = await this.fetchFromSyncApi('/accounts/' + personName);
+      
+      if (!accountsResponse || !accountsResponse.data) {
+        return 0;
+      }
+
+      const accounts = accountsResponse.data;
+      let totalValue = 0;
+
+      accounts.forEach(account => {
+        if (account.summary) {
+          totalValue += account.summary.totalEquityCAD || 0;
+        }
+      });
+
+      return totalValue;
+    } catch (error) {
+      logger.error(`Error getting current portfolio value for ${personName}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get historical performance data
+   */
+  async getHistoricalPerformance(personName, startDate, endDate, interval = 'daily') {
+    try {
+      const snapshots = await PortfolioSnapshot.find({
+        personName,
+        snapshotDate: {
+          $gte: startDate,
+          $lte: endDate
+        }
+      }).sort({ snapshotDate: 1 });
+
+      if (snapshots.length === 0) {
+        return [];
+      }
+
+      const performance = [];
+      let previousValue = snapshots[0].totalValueCAD;
+      const initialValue = snapshots[0].totalValueCAD;
+
+      snapshots.forEach((snapshot, index) => {
+        if (index === 0) {
+          performance.push({
+            date: snapshot.snapshotDate,
+            value: snapshot.totalValueCAD,
+            dayReturn: 0,
+            cumulativeReturn: 0
+          });
+        } else {
+          const currentValue = snapshot.totalValueCAD;
+          const dayReturn = previousValue > 0 
+            ? ((currentValue - previousValue) / previousValue) * 100 
+            : 0;
+          
+          const cumulativeReturn = initialValue > 0 
+            ? ((currentValue - initialValue) / initialValue) * 100 
+            : 0;
+
+          performance.push({
+            date: snapshot.snapshotDate,
+            value: currentValue,
+            dayReturn,
+            cumulativeReturn
+          });
+
+          previousValue = currentValue;
+        }
+      });
+
+      // Apply interval filtering if needed
+      if (interval === 'weekly') {
+        return this.filterByInterval(performance, 7);
+      } else if (interval === 'monthly') {
+        return this.filterByInterval(performance, 30);
+      }
+
+      return performance;
+    } catch (error) {
+      logger.error(`Error getting historical performance for ${personName}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Filter performance data by interval
+   */
+  filterByInterval(data, days) {
+    if (data.length === 0) return [];
+    
+    const filtered = [data[0]];
+    let lastDate = moment(data[0].date);
+
+    for (let i = 1; i < data.length; i++) {
+      const currentDate = moment(data[i].date);
+      if (currentDate.diff(lastDate, 'days') >= days) {
+        filtered.push(data[i]);
+        lastDate = currentDate;
+      }
+    }
+
+    // Always include the last data point
+    if (filtered[filtered.length - 1] !== data[data.length - 1]) {
+      filtered.push(data[data.length - 1]);
+    }
+
+    return filtered;
+  }
+
+  /**
+   * Calculate Time-Weighted Return
+   */
+  async calculateTimeWeightedReturn(personName, startDate, endDate) {
+    try {
+      const snapshots = await PortfolioSnapshot.find({
+        personName,
+        snapshotDate: {
+          $gte: startDate,
+          $lte: endDate
+        }
+      }).sort({ snapshotDate: 1 });
+
+      if (snapshots.length < 2) {
+        return 0;
+      }
+
+      // Get cash flows to identify when money was added/removed
+      const cashFlows = await this.getCashFlows(personName, startDate, endDate);
+
+      // Calculate sub-period returns
+      const subPeriodReturns = [];
+      let lastValue = snapshots[0].totalValueCAD;
+
+      for (let i = 1; i < snapshots.length; i++) {
+        const currentValue = snapshots[i].totalValueCAD;
+        
+        // Check if there was a cash flow between snapshots
+        const cashFlowAmount = this.getCashFlowBetweenDates(
+          cashFlows,
+          snapshots[i - 1].snapshotDate,
+          snapshots[i].snapshotDate
+        );
+
+        // Adjust for cash flows
+        const adjustedLastValue = lastValue + cashFlowAmount;
+        
+        if (adjustedLastValue > 0) {
+          const periodReturn = (currentValue - adjustedLastValue) / adjustedLastValue;
+          subPeriodReturns.push(periodReturn);
+        }
+
+        lastValue = currentValue;
+      }
+
+      // Geometrically link the returns
+      const twr = this.geometricLinking(subPeriodReturns);
+      return twr * 100;
+    } catch (error) {
+      logger.error(`Error calculating TWR for ${personName}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate Money-Weighted Return (simplified)
+   */
+  async calculateMoneyWeightedReturn(personName, startDate, endDate) {
+    try {
+      const [startSnapshot, endSnapshot] = await Promise.all([
+        PortfolioSnapshot.findOne({ 
+          personName, 
+          snapshotDate: { $gte: startDate } 
+        }).sort({ snapshotDate: 1 }),
+        PortfolioSnapshot.findOne({ 
+          personName, 
+          snapshotDate: { $lte: endDate } 
+        }).sort({ snapshotDate: -1 })
+      ]);
+
+      if (!startSnapshot || !endSnapshot) {
+        return 0;
+      }
+
+      // Get cash flows
+      const cashFlows = await this.getCashFlows(personName, startDate, endDate);
+
+      // Simplified MWR calculation
+      const totalInvested = startSnapshot.totalValueCAD + 
+        cashFlows.filter(cf => cf.type === 'Deposit').reduce((sum, cf) => sum + cf.amount, 0);
+      
+      const totalWithdrawn = 
+        cashFlows.filter(cf => cf.type === 'Withdrawal').reduce((sum, cf) => sum + Math.abs(cf.amount), 0);
+
+      const netInvested = totalInvested - totalWithdrawn;
+      const finalValue = endSnapshot.totalValueCAD;
+
+      if (netInvested <= 0) return 0;
+
+      const totalReturn = (finalValue - netInvested) / netInvested;
+      
+      // Annualize the return
+      const days = moment(endDate).diff(moment(startDate), 'days');
+      const years = days / 365;
+      
+      if (years > 0) {
+        return (Math.pow(1 + totalReturn, 1 / years) - 1) * 100;
+      }
+
+      return totalReturn * 100;
+    } catch (error) {
+      logger.error(`Error calculating MWR for ${personName}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get cash flows from activities
+   */
+  async getCashFlows(personName, startDate, endDate) {
+    try {
+      const response = await this.fetchFromSyncApi('/activities/person/' + personName, {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      });
+
+      const activities = response.data || [];
+
+      return activities
+        .filter(activity => 
+          activity.type === 'Deposit' || 
+          activity.type === 'Withdrawal' ||
+          activity.type === 'Transfer'
+        )
+        .map(activity => ({
+          date: new Date(activity.transactionDate),
+          amount: activity.netAmount || 0,
+          type: activity.type
+        }));
+    } catch (error) {
+      logger.error(`Error getting cash flows for ${personName}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get cash flow amount between two dates
+   */
+  getCashFlowBetweenDates(cashFlows, startDate, endDate) {
+    return cashFlows
+      .filter(cf => cf.date > startDate && cf.date <= endDate)
+      .reduce((sum, cf) => sum + cf.amount, 0);
+  }
+
+  /**
+   * Geometric linking of returns
+   */
+  geometricLinking(returns) {
+    if (returns.length === 0) return 0;
+    
+    let product = 1;
+    for (const r of returns) {
+      product *= (1 + r);
+    }
+    
+    return product - 1;
+  }
+
+  /**
+   * Annualize a return
+   */
+  annualizeReturn(returnValue, startDate, endDate) {
+    const days = moment(endDate).diff(moment(startDate), 'days');
+    const years = days / 365.0;
+
+    if (years <= 0 || years === 1) return returnValue;
+
+    return Math.pow(1 + returnValue, 1 / years) - 1;
   }
 
   /**
