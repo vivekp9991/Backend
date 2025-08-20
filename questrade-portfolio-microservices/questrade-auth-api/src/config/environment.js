@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const config = {
   server: {
-    port: process.env.PORT || 3001,
+    port: process.env.PORT || 4001,  // Changed from 3001 to 4001
     environment: process.env.NODE_ENV || 'development'
   },
   database: {

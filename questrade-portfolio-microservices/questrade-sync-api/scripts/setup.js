@@ -21,7 +21,7 @@ class SyncAPISetup {
   constructor() {
     this.mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/questrade_portfolio';
     this.apiUrl = `http://localhost:${process.env.PORT || 4002}/api`;
-    this.authApiUrl = process.env.AUTH_API_URL || 'http://localhost:4001/api';
+    this.authApiUrl = process.env.AUTH_API_URL || 'http://localhost:4001/api';  // Fixed: Changed from 3001 to 4001
   }
 
   async connectDatabase() {
@@ -42,7 +42,7 @@ class SyncAPISetup {
       return true;
     } catch (error) {
       console.log('❌ Auth API is not accessible at', this.authApiUrl);
-      console.log('   Please ensure the Auth API is running on port 3001');
+      console.log('   Please ensure the Auth API is running on port 4001');  // Fixed: Changed from 3001 to 4001
       return false;
     }
   }
@@ -79,7 +79,7 @@ class SyncAPISetup {
 ║                                                                ║
 ║  Prerequisites:                                                ║
 ║  1. MongoDB is running                                        ║
-║  2. Auth API is running on port 3001                          ║
+║  2. Auth API is running on port 4001                          ║
 ║  3. Valid persons with tokens configured in Auth API          ║
 ╚════════════════════════════════════════════════════════════════╝
 `);
@@ -370,7 +370,7 @@ class SyncAPISetup {
       
       if (!status.authApiAvailable) {
         console.log('\n❌ Cannot proceed without Auth API');
-        console.log('Please start the Auth API on port 3001 and try again.');
+        console.log('Please start the Auth API on port 4001 and try again.');  // Fixed: Changed from 3001 to 4001
         process.exit(1);
       }
       

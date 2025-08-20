@@ -9,7 +9,7 @@ const config = {
     uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/questrade_portfolio'
   },
   authApi: {
-    url: process.env.AUTH_API_URL || 'http://localhost:3001/api',
+    url: process.env.AUTH_API_URL || 'http://localhost:4001/api',  // Changed from 3001 to 4001
     apiKey: process.env.AUTH_API_KEY
   },
   sync: {
