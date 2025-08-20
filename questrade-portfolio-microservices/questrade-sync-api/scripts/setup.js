@@ -21,7 +21,7 @@ class SyncAPISetup {
   constructor() {
     this.mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/questrade_portfolio';
     this.apiUrl = `http://localhost:${process.env.PORT || 4002}/api`;
-    this.authApiUrl = process.env.AUTH_API_URL || 'http://localhost:4001/api';  // Fixed: Changed from 3001 to 4001
+    this.authApiUrl = process.env.AUTH_API_URL || 'http://localhost:4001/api';
   }
 
   async connectDatabase() {
@@ -42,7 +42,7 @@ class SyncAPISetup {
       return true;
     } catch (error) {
       console.log('❌ Auth API is not accessible at', this.authApiUrl);
-      console.log('   Please ensure the Auth API is running on port 4001');  // Fixed: Changed from 3001 to 4001
+      console.log('   Please ensure the Auth API is running on port 4001');
       return false;
     }
   }
@@ -210,16 +210,25 @@ class SyncAPISetup {
       console.log(`${i + 1}. ${p.personName}`);
     });
     
-    const choice = await question('\nSelect person number: ');
-    const index = parseInt(choice) - 1;
+    const choice = await question(`\nSelect person number (1-${persons.length}): `);
+    const choiceTrimmed = choice.trim();
+    
+    // Validate input - must be a number
+    if (!/^\d+$/.test(choiceTrimmed)) {
+      console.log('❌ Invalid input. Please enter a number.');
+      return;
+    }
+    
+    const index = parseInt(choiceTrimmed) - 1;
     
     if (index < 0 || index >= persons.length) {
-      console.log('Invalid selection.');
+      console.log('❌ Invalid selection. Please select a number from the list.');
       return;
     }
     
     const person = persons[index];
     
+    console.log(`\nSelected: ${person.personName}`);
     console.log('\nSync types:');
     console.log('1. Full sync (all data)');
     console.log('2. Accounts only');
@@ -227,6 +236,13 @@ class SyncAPISetup {
     console.log('4. Activities only');
     
     const syncTypeChoice = await question('\nSelect sync type (1-4): ');
+    const syncTypeChoiceTrimmed = syncTypeChoice.trim();
+    
+    // Validate sync type input
+    if (!/^[1-4]$/.test(syncTypeChoiceTrimmed)) {
+      console.log('❌ Invalid sync type. Please select 1-4.');
+      return;
+    }
     
     const syncTypes = {
       '1': 'full',
@@ -235,7 +251,7 @@ class SyncAPISetup {
       '4': 'activities'
     };
     
-    const syncType = syncTypes[syncTypeChoice] || 'full';
+    const syncType = syncTypes[syncTypeChoiceTrimmed];
     
     try {
       console.log(`\n⏳ Starting ${syncType} sync for ${person.personName}...`);
@@ -320,6 +336,90 @@ class SyncAPISetup {
     }
   }
 
+  async testSyncForOneAccount() {
+    console.log('\n=== Test Sync for One Account ===');
+    
+    const persons = await this.getActivePersons();
+    if (persons.length === 0) {
+      console.log('No active persons found.');
+      return;
+    }
+    
+    console.log('\nAvailable persons:');
+    persons.forEach((p, i) => {
+      console.log(`${i + 1}. ${p.personName}`);
+    });
+    
+    const personChoice = await question(`\nSelect person number (1-${persons.length}): `);
+    const personChoiceTrimmed = personChoice.trim();
+    
+    // Validate input - must be a number
+    if (!/^\d+$/.test(personChoiceTrimmed)) {
+      console.log('❌ Invalid input. Please enter a number.');
+      return;
+    }
+    
+    const personIndex = parseInt(personChoiceTrimmed) - 1;
+    
+    if (personIndex < 0 || personIndex >= persons.length) {
+      console.log('❌ Invalid selection. Please select a number from the list.');
+      return;
+    }
+    
+    const person = persons[personIndex];
+    
+    try {
+      // Get accounts for this person
+      const accountsResponse = await axios.get(`${this.apiUrl}/accounts/${person.personName}`);
+      const accounts = accountsResponse.data.data;
+      
+      if (!accounts || accounts.length === 0) {
+        console.log('No accounts found for this person. Please sync accounts first.');
+        return;
+      }
+      
+      console.log(`\nAccounts for ${person.personName}:`);
+      accounts.forEach((acc, i) => {
+        console.log(`${i + 1}. ${acc.type} - ${acc.number} (${acc.accountId})`);
+      });
+      
+      const accountChoice = await question(`\nSelect account number (1-${accounts.length}): `);
+      const accountChoiceTrimmed = accountChoice.trim();
+      
+      // Validate account selection
+      if (!/^\d+$/.test(accountChoiceTrimmed)) {
+        console.log('❌ Invalid input. Please enter a number.');
+        return;
+      }
+      
+      const accountIndex = parseInt(accountChoiceTrimmed) - 1;
+      
+      if (accountIndex < 0 || accountIndex >= accounts.length) {
+        console.log('❌ Invalid selection. Please select a number from the list.');
+        return;
+      }
+      
+      const account = accounts[accountIndex];
+      
+      console.log(`\n⏳ Testing sync for account ${account.accountId}...`);
+      
+      const syncResponse = await axios.post(
+        `${this.apiUrl}/sync/account/${person.personName}/${account.accountId}`,
+        {
+          syncType: 'full',
+          triggeredBy: 'manual'
+        }
+      );
+      
+      if (syncResponse.data.success) {
+        console.log('✅ Test sync completed!');
+        console.log('  Records processed:', syncResponse.data.data.recordsProcessed);
+      }
+    } catch (error) {
+      console.log('❌ Test sync failed:', error.response?.data?.error || error.message);
+    }
+  }
+
   async configureSyncSchedule() {
     console.log('\n=== Configure Sync Schedule ===');
     
@@ -370,7 +470,7 @@ class SyncAPISetup {
       
       if (!status.authApiAvailable) {
         console.log('\n❌ Cannot proceed without Auth API');
-        console.log('Please start the Auth API on port 4001 and try again.');  // Fixed: Changed from 3001 to 4001
+        console.log('Please start the Auth API on port 4001 and try again.');
         process.exit(1);
       }
       
@@ -396,7 +496,7 @@ class SyncAPISetup {
               await this.clearAllData();
               break;
             case '6':
-              console.log('Test sync not implemented yet');
+              await this.testSyncForOneAccount();
               break;
             case '7':
               await this.configureSyncSchedule();
