@@ -151,12 +151,12 @@ The service implements intelligent rate limiting:
 
 Check service health:
 ```
-GET http://localhost:3002/health
+GET http://localhost:4002/health
 ```
 
 View sync status:
 ```
-GET http://localhost:3002/api/sync/status
+GET http://localhost:4002/api/sync/status
 ```
 
 ## Troubleshooting
