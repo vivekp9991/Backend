@@ -139,6 +139,7 @@ class MarketAPISetup {
       
       if (response.data.success) {
         const quote = response.data.data;
+        console.log("setup quote :- " + JSON.stringify(quote));
         console.log('\n✅ Quote retrieved successfully!');
         console.log(`  Symbol: ${quote.symbol}`);
         console.log(`  Last Price: $${quote.lastTradePrice}`);
