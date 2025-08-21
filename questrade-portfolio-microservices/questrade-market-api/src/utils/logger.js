@@ -1,6 +1,24 @@
 const winston = require('winston');
 const path = require('path');
 
+// Helper function to safely stringify objects with circular references
+const safeStringify = (obj) => {
+  const cache = new Set();
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (cache.has(value)) {
+        return '[Circular]';
+      }
+      cache.add(value);
+    }
+    // Avoid logging sensitive or large objects
+    if (key === 'request' || key === 'response' || key === 'config') {
+      return '[Omitted]';
+    }
+    return value;
+  });
+};
+
 const logFormat = winston.format.combine(
   winston.format.timestamp({
     format: 'YYYY-MM-DD HH:mm:ss'
@@ -17,7 +35,11 @@ const consoleFormat = winston.format.combine(
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
     let msg = `${timestamp} [${level}]: ${message}`;
     if (Object.keys(meta).length > 0) {
-      msg += ' ' + JSON.stringify(meta);
+      try {
+        msg += ' ' + safeStringify(meta);
+      } catch (error) {
+        msg += ' [Error stringifying metadata]';
+      }
     }
     return msg;
   })

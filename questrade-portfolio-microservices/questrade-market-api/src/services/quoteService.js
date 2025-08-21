@@ -31,7 +31,15 @@ class QuoteService {
       
       return quote;
     } catch (error) {
-      logger.error(`Failed to get quote for ${symbol}:`, error);
+      // Extract meaningful error information
+      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+      const errorStatus = error.response?.status;
+      
+      logger.error(`Failed to get quote for ${symbol}`, {
+        errorMessage,
+        errorStatus,
+        symbol
+      });
       
       // Try to return cached quote even if stale
       const cachedQuote = await Quote.getLatest(symbol);
@@ -40,45 +48,7 @@ class QuoteService {
         return cachedQuote;
       }
       
-      throw error;
-    }
-  }
-
-  async getMultipleQuotes(symbols, forceRefresh = false) {
-    try {
-      const quotes = [];
-      
-      // Check cache for each symbol
-      const symbolsToFetch = [];
-      
-      if (!forceRefresh) {
-        for (const symbol of symbols) {
-          const cachedQuote = await Quote.getLatest(symbol);
-          
-          if (cachedQuote && !cachedQuote.isStale(config.market.marketDataCacheTTL)) {
-            quotes.push(cachedQuote);
-          } else {
-            symbolsToFetch.push(symbol);
-          }
-        }
-      } else {
-        symbolsToFetch.push(...symbols);
-      }
-      
-      // Fetch missing quotes
-      if (symbolsToFetch.length > 0) {
-        const freshQuotes = await this.fetchMultipleQuotesFromQuestrade(symbolsToFetch);
-        
-        // Save to cache
-        await Quote.bulkUpdateQuotes(freshQuotes);
-        
-        quotes.push(...freshQuotes);
-      }
-      
-      return quotes;
-    } catch (error) {
-      logger.error('Failed to get multiple quotes:', error);
-      throw error;
+      throw new Error(`Failed to get quote for ${symbol}: ${errorMessage}`);
     }
   }
 
@@ -115,8 +85,17 @@ class QuoteService {
         
         return this.transformQuestradeQuote(questradeQuote);
       } catch (error) {
-        logger.error(`Failed to fetch quote from Questrade for ${symbol}:`, error);
-        throw error;
+        // Extract meaningful error information
+        const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+        const errorStatus = error.response?.status;
+        
+        logger.error(`Failed to fetch quote from Questrade for ${symbol}`, {
+          errorMessage,
+          errorStatus,
+          symbol
+        });
+        
+        throw new Error(`Questrade API error for ${symbol}: ${errorMessage}`);
       }
     });
   }
@@ -157,11 +136,109 @@ class QuoteService {
         
         return quoteResponse.data.quotes.map(q => this.transformQuestradeQuote(q));
       } catch (error) {
-        logger.error('Failed to fetch multiple quotes from Questrade:', error);
-        throw error;
+        const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+        logger.error('Failed to fetch multiple quotes from Questrade', {
+          errorMessage,
+          symbolCount: symbols.length
+        });
+        throw new Error(`Failed to fetch multiple quotes: ${errorMessage}`);
       }
     });
   }
+
+  async getSymbolId(symbol, person) {
+    try {
+      // Check local database first
+      let symbolData = await Symbol.findOne({ symbol: symbol.toUpperCase() });
+      
+      if (symbolData) {
+        return symbolData;
+      }
+      
+      // Search in Questrade
+      const response = await axios.get(
+        `${this.authApiUrl}/auth/access-token/${person}`
+      );
+      
+      const tokenData = response.data.data;
+      
+      const searchResponse = await axios.get(
+        `${tokenData.apiServer}/v1/symbols/search?prefix=${symbol}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      const symbols = searchResponse.data.symbols || [];
+      const exactMatch = symbols.find(s => s.symbol === symbol.toUpperCase());
+      
+      if (exactMatch) {
+        // Save to database
+        symbolData = await Symbol.findOneAndUpdate(
+          { symbol: exactMatch.symbol },
+          {
+            symbol: exactMatch.symbol,
+            symbolId: exactMatch.symbolId,
+            description: exactMatch.description,
+            securityType: exactMatch.securityType,
+            exchange: exactMatch.exchange,
+            currency: exactMatch.currency
+          },
+          { upsert: true, new: true }
+        );
+        
+        return symbolData;
+      }
+      
+      return null;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+      logger.error(`Failed to get symbol ID for ${symbol}`, {
+        errorMessage,
+        person
+      });
+      return null;
+    }
+  }
+
+  async getAvailablePerson() {
+    try {
+      const response = await axios.get(`${this.authApiUrl}/persons`);
+      const persons = response.data.data.filter(p => p.isActive && p.hasValidToken);
+      
+      if (persons.length === 0) {
+        throw new Error('No active persons with valid tokens available');
+      }
+      
+      return persons[0].personName;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+      logger.error('Failed to get available person', { errorMessage });
+      throw new Error(`Failed to get available person: ${errorMessage}`);
+    }
+  }
+
+  async saveQuote(quote) {
+    try {
+      // Validate quote data before saving
+      const validatedQuote = this.validateQuoteData(quote);
+      
+      await Quote.findOneAndUpdate(
+        { symbol: validatedQuote.symbol },
+        validatedQuote,
+        { upsert: true, new: true, runValidators: true }
+      );
+    } catch (error) {
+      logger.error('Failed to save quote', {
+        errorMessage: error.message,
+        symbol: quote?.symbol
+      });
+    }
+  }
+
+  // ... rest of the methods remain the same ...
 
   // Helper function to safely parse numbers
   safeParseNumber(value, defaultValue = 0) {
@@ -240,22 +317,6 @@ class QuoteService {
     };
   }
 
-  async saveQuote(quote) {
-    try {
-      // Validate quote data before saving
-      const validatedQuote = this.validateQuoteData(quote);
-      
-      await Quote.findOneAndUpdate(
-        { symbol: validatedQuote.symbol },
-        validatedQuote,
-        { upsert: true, new: true, runValidators: true }
-      );
-    } catch (error) {
-      logger.error('Failed to save quote:', error);
-      logger.error('Quote data that failed:', JSON.stringify(quote));
-    }
-  }
-
   validateQuoteData(quote) {
     // Ensure all numeric fields are valid numbers
     const validated = { ...quote };
@@ -276,75 +337,6 @@ class QuoteService {
     return validated;
   }
 
-  async getSymbolId(symbol, person) {
-    try {
-      // Check local database first
-      let symbolData = await Symbol.findOne({ symbol: symbol.toUpperCase() });
-      
-      if (symbolData) {
-        return symbolData;
-      }
-      
-      // Search in Questrade
-      const response = await axios.get(
-        `${this.authApiUrl}/auth/access-token/${person}`
-      );
-      
-      const tokenData = response.data.data;
-      
-      const searchResponse = await axios.get(
-        `${tokenData.apiServer}/v1/symbols/search?prefix=${symbol}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${tokenData.accessToken}`
-          }
-        }
-      );
-      
-      const symbols = searchResponse.data.symbols || [];
-      const exactMatch = symbols.find(s => s.symbol === symbol.toUpperCase());
-      
-      if (exactMatch) {
-        // Save to database
-        symbolData = await Symbol.findOneAndUpdate(
-          { symbol: exactMatch.symbol },
-          {
-            symbol: exactMatch.symbol,
-            symbolId: exactMatch.symbolId,
-            description: exactMatch.description,
-            securityType: exactMatch.securityType,
-            exchange: exactMatch.exchange,
-            currency: exactMatch.currency
-          },
-          { upsert: true, new: true }
-        );
-        
-        return symbolData;
-      }
-      
-      return null;
-    } catch (error) {
-      logger.error(`Failed to get symbol ID for ${symbol}:`, error);
-      return null;
-    }
-  }
-
-  async getAvailablePerson() {
-    try {
-      const response = await axios.get(`${this.authApiUrl}/persons`);
-      const persons = response.data.data.filter(p => p.isActive && p.hasValidToken);
-      
-      if (persons.length === 0) {
-        throw new Error('No active persons with valid tokens available');
-      }
-      
-      return persons[0].personName;
-    } catch (error) {
-      logger.error('Failed to get available person:', error);
-      throw error;
-    }
-  }
-
   async refreshQuote(symbol) {
     return this.getQuote(symbol, true);
   }
@@ -359,6 +351,48 @@ class QuoteService {
     }).sort({ lastUpdated: 1 });
     
     return quotes;
+  }
+
+  async getMultipleQuotes(symbols, forceRefresh = false) {
+    try {
+      const quotes = [];
+      
+      // Check cache for each symbol
+      const symbolsToFetch = [];
+      
+      if (!forceRefresh) {
+        for (const symbol of symbols) {
+          const cachedQuote = await Quote.getLatest(symbol);
+          
+          if (cachedQuote && !cachedQuote.isStale(config.market.marketDataCacheTTL)) {
+            quotes.push(cachedQuote);
+          } else {
+            symbolsToFetch.push(symbol);
+          }
+        }
+      } else {
+        symbolsToFetch.push(...symbols);
+      }
+      
+      // Fetch missing quotes
+      if (symbolsToFetch.length > 0) {
+        const freshQuotes = await this.fetchMultipleQuotesFromQuestrade(symbolsToFetch);
+        
+        // Save to cache
+        await Quote.bulkUpdateQuotes(freshQuotes);
+        
+        quotes.push(...freshQuotes);
+      }
+      
+      return quotes;
+    } catch (error) {
+      const errorMessage = error.message || 'Unknown error';
+      logger.error('Failed to get multiple quotes', {
+        errorMessage,
+        symbolCount: symbols.length
+      });
+      throw error;
+    }
   }
 }
 
