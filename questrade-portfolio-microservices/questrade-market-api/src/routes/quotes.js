@@ -1,92 +1,376 @@
-const express = require('express');
-const router = express.Router();
-const quoteService = require('../services/quoteService');
-const { asyncHandler } = require('../middleware/errorHandler');
-const { validateSymbol, validateSymbols } = require('../middleware/validateRequest');
-const cache = require('../middleware/cache');
+const mongoose = require('mongoose');
 
-// Get single quote
-router.get('/:symbol', validateSymbol, cache.middleware, asyncHandler(async (req, res) => {
-  const { symbol } = req;
+const quoteSchema = new mongoose.Schema({
+  symbol: {
+    type: String,
+    required: true,
+    index: true
+  },
   
-  const quote = await quoteService.getQuote(symbol);
+  symbolId: {
+    type: Number,
+    index: true,
+    default: 0
+  },
   
-  res.json({
-    success: true,
-    data: quote
-  });
-}));
-
-// Get multiple quotes
-router.get('/', validateSymbols, cache.middleware, asyncHandler(async (req, res) => {
-  const { symbols } = req;
-  
-  const quotes = await quoteService.getMultipleQuotes(symbols);
-  
-  res.json({
-    success: true,
-    data: quotes
-  });
-}));
-
-// Get quote stream (polling-based)
-router.get('/:symbol/stream', validateSymbol, asyncHandler(async (req, res) => {
-  const { symbol } = req;
-  const { interval = 5000 } = req.query; // Default 5 seconds
-  
-  // Set headers for SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  
-  // Send initial quote
-  const initialQuote = await quoteService.getQuote(symbol);
-  res.write(`data: ${JSON.stringify(initialQuote)}\n\n`);
-  
-  // Set up interval for updates
-  const streamInterval = setInterval(async () => {
-    try {
-      const quote = await quoteService.getQuote(symbol, true); // Force refresh
-      res.write(`data: ${JSON.stringify(quote)}\n\n`);
-    } catch (error) {
-      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+  // Price data
+  lastTradePrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'lastTradePrice must be a valid number'
     }
-  }, parseInt(interval));
+  },
+  lastTradeSize: {
+    type: Number,
+    default: 0
+  },
+  lastTradeTick: String,
+  lastTradeTime: Date,
   
-  // Clean up on client disconnect
-  req.on('close', () => {
-    clearInterval(streamInterval);
-    res.end();
-  });
-}));
+  bidPrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'bidPrice must be a valid number'
+    }
+  },
+  bidSize: {
+    type: Number,
+    default: 0
+  },
+  askPrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'askPrice must be a valid number'
+    }
+  },
+  askSize: {
+    type: Number,
+    default: 0
+  },
+  
+  openPrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'openPrice must be a valid number'
+    }
+  },
+  highPrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'highPrice must be a valid number'
+    }
+  },
+  lowPrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'lowPrice must be a valid number'
+    }
+  },
+  closePrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'closePrice must be a valid number'
+    }
+  },
+  
+  previousClosePrice: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'previousClosePrice must be a valid number'
+    }
+  },
+  change: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'change must be a valid number'
+    }
+  },
+  changePercent: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'changePercent must be a valid number'
+    }
+  },
+  
+  // Day change fields (separate from overall change)
+  dayChange: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'dayChange must be a valid number'
+    }
+  },
+  dayChangePercent: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'dayChangePercent must be a valid number'
+    }
+  },
+  
+  // Volume data
+  volume: {
+    type: Number,
+    default: 0,
+    validate: {
+      validator: function(v) {
+        return !isNaN(v) && isFinite(v);
+      },
+      message: 'volume must be a valid number'
+    }
+  },
+  averageVolume: {
+    type: Number,
+    default: 0
+  },
+  volumeWeightedAveragePrice: {
+    type: Number,
+    default: 0
+  },
+  
+  // 52-week data
+  week52High: {
+    type: Number,
+    default: 0
+  },
+  week52Low: {
+    type: Number,
+    default: 0
+  },
+  week52HighDate: Date,
+  week52LowDate: Date,
+  
+  // Market cap and fundamentals
+  marketCap: Number,
+  eps: Number,
+  pe: Number,
+  dividend: Number,
+  yield: Number,
+  
+  // Additional fields
+  exchange: String,
+  currency: String,
+  isHalted: {
+    type: Boolean,
+    default: false
+  },
+  delay: {
+    type: Number,
+    default: 0
+  },
+  
+  // Metadata
+  isRealTime: {
+    type: Boolean,
+    default: false
+  },
+  
+  lastUpdated: {
+    type: Date,
+    default: Date.now,
+    index: true
+  },
+  
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
 
-// Get historical quotes
-router.get('/:symbol/history', validateSymbol, asyncHandler(async (req, res) => {
-  const { symbol } = req;
-  const { days = 30 } = req.query;
-  
-  const history = await quoteService.getHistoricalQuotes(symbol, parseInt(days));
-  
-  res.json({
-    success: true,
-    data: history
-  });
-}));
+// Compound index for unique quotes
+quoteSchema.index({ symbol: 1, lastUpdated: -1 });
 
-// Refresh quote (force update)
-router.post('/:symbol/refresh', validateSymbol, asyncHandler(async (req, res) => {
-  const { symbol } = req;
-  
-  const quote = await quoteService.refreshQuote(symbol);
-  
-  // Invalidate cache for this symbol
-  cache.invalidatePattern(symbol);
-  
-  res.json({
-    success: true,
-    data: quote,
-    message: 'Quote refreshed successfully'
-  });
-}));
+// TTL index for automatic cleanup (24 hours)
+quoteSchema.index({ lastUpdated: 1 }, { expireAfterSeconds: 86400 });
 
-module.exports = router;
+// Virtual for price change indicators
+quoteSchema.virtual('isUp').get(function() {
+  return this.change > 0;
+});
+
+quoteSchema.virtual('isDown').get(function() {
+  return this.change < 0;
+});
+
+// Method to check if quote is stale
+quoteSchema.methods.isStale = function(seconds = 10) {
+  const age = Date.now() - this.lastUpdated;
+  return age > (seconds * 1000);
+};
+
+// Static method to get latest quote
+quoteSchema.statics.getLatest = function(symbol) {
+  return this.findOne({ symbol })
+    .sort({ lastUpdated: -1 });
+};
+
+// Static method to bulk update quotes
+quoteSchema.statics.bulkUpdateQuotes = async function(quotes) {
+  // Validate each quote before bulk update
+  const validatedQuotes = quotes.map(quote => {
+    const validated = { ...quote };
+    
+    // Ensure numeric fields are valid
+    const numericFields = [
+      'symbolId', 'lastTradePrice', 'bidPrice', 'askPrice',
+      'openPrice', 'highPrice', 'lowPrice', 'closePrice',
+      'previousClosePrice', 'change', 'changePercent', 
+      'dayChange', 'dayChangePercent', 'volume'
+    ];
+    
+    numericFields.forEach(field => {
+      if (validated[field] !== undefined) {
+        const value = Number(validated[field]);
+        validated[field] = (isNaN(value) || !isFinite(value)) ? 0 : value;
+      }
+    });
+    
+    return validated;
+  });
+  
+  const operations = validatedQuotes.map(quote => ({
+    updateOne: {
+      filter: { symbol: quote.symbol },
+      update: {
+        $set: {
+          ...quote,
+          lastUpdated: new Date()
+        }
+      },
+      upsert: true
+    }
+  }));
+  
+  return this.bulkWrite(operations);
+};
+
+// Ensure required fields have proper defaults before saving
+quoteSchema.pre('save', function(next) {
+  // Helper function to validate and fix numeric values
+  const validateNumber = (value, defaultValue = 0) => {
+    if (value === undefined || value === null) {
+      return defaultValue;
+    }
+    const num = Number(value);
+    return (isNaN(num) || !isFinite(num)) ? defaultValue : num;
+  };
+  
+  // Validate all numeric fields
+  this.lastTradePrice = validateNumber(this.lastTradePrice);
+  this.previousClosePrice = validateNumber(this.previousClosePrice);
+  this.bidPrice = validateNumber(this.bidPrice);
+  this.askPrice = validateNumber(this.askPrice);
+  this.openPrice = validateNumber(this.openPrice);
+  this.highPrice = validateNumber(this.highPrice);
+  this.lowPrice = validateNumber(this.lowPrice);
+  this.closePrice = validateNumber(this.closePrice);
+  this.volume = validateNumber(this.volume);
+  
+  // Ensure change and changePercent are calculated if not set or invalid
+  if (this.change === undefined || this.change === null || isNaN(this.change) || !isFinite(this.change)) {
+    if (this.lastTradePrice > 0 && this.previousClosePrice > 0) {
+      this.change = this.lastTradePrice - this.previousClosePrice;
+      // Final check for NaN
+      if (isNaN(this.change) || !isFinite(this.change)) {
+        this.change = 0;
+      }
+    } else {
+      this.change = 0;
+    }
+  }
+  
+  if (this.changePercent === undefined || this.changePercent === null || isNaN(this.changePercent) || !isFinite(this.changePercent)) {
+    if (this.previousClosePrice > 0 && this.change !== undefined && !isNaN(this.change)) {
+      this.changePercent = (this.change / this.previousClosePrice) * 100;
+      // Final check for NaN or Infinity
+      if (isNaN(this.changePercent) || !isFinite(this.changePercent)) {
+        this.changePercent = 0;
+      }
+    } else {
+      this.changePercent = 0;
+    }
+  }
+  
+  // Handle day change fields - if not set, use regular change
+  if (this.dayChange === undefined || this.dayChange === null || isNaN(this.dayChange)) {
+    this.dayChange = this.change || 0;
+  }
+  
+  if (this.dayChangePercent === undefined || this.dayChangePercent === null || isNaN(this.dayChangePercent)) {
+    this.dayChangePercent = this.changePercent || 0;
+  }
+  
+  // Round to reasonable precision
+  this.change = Math.round(this.change * 100) / 100;
+  this.changePercent = Math.round(this.changePercent * 100) / 100;
+  this.dayChange = Math.round(this.dayChange * 100) / 100;
+  this.dayChangePercent = Math.round(this.dayChangePercent * 100) / 100;
+  
+  next();
+});
+
+// Pre-validate hook to ensure no NaN values
+quoteSchema.pre('validate', function(next) {
+  const numericFields = [
+    'symbolId', 'lastTradePrice', 'lastTradeSize', 'bidPrice', 'bidSize',
+    'askPrice', 'askSize', 'openPrice', 'highPrice', 'lowPrice', 'closePrice',
+    'previousClosePrice', 'change', 'changePercent', 'dayChange', 'dayChangePercent',
+    'volume', 'averageVolume', 'volumeWeightedAveragePrice', 'week52High', 'week52Low', 'delay'
+  ];
+  
+  numericFields.forEach(field => {
+    if (this[field] !== undefined && (isNaN(this[field]) || !isFinite(this[field]))) {
+      this[field] = 0;
+    }
+  });
+  
+  next();
+});
+
+module.exports = mongoose.model('Quote', quoteSchema);
