@@ -50,10 +50,76 @@ const symbolSchema = new mongoose.Schema({
     default: 'USD'
   },
   
+  // Market data - NEW FIELDS
+  prevDayClosePrice: {
+    type: Number,
+    default: 0
+  },
+  
+  highPrice52: {
+    type: Number,
+    default: 0
+  },
+  
+  lowPrice52: {
+    type: Number,
+    default: 0
+  },
+  
+  averageVol3Months: {
+    type: Number,
+    default: 0
+  },
+  
+  averageVol20Days: {
+    type: Number,
+    default: 0
+  },
+  
+  outstandingShares: {
+    type: Number,
+    default: 0
+  },
+  
+  eps: {
+    type: Number,
+    default: 0
+  },
+  
+  pe: {
+    type: Number,
+    default: 0
+  },
+  
+  dividend: {
+    type: Number,
+    default: 0
+  },
+  
+  yield: {
+    type: Number,
+    default: 0
+  },
+  
+  exDate: Date,
+  dividendDate: Date,
+  
+  marketCap: {
+    type: Number,
+    default: 0
+  },
+  
+  tradeUnit: {
+    type: Number,
+    default: 1
+  },
+  
   // Additional information
   sector: String,
   industry: String,
-  marketCap: Number,
+  industrySector: String,
+  industryGroup: String,
+  industrySubGroup: String,
   
   // Option-specific fields
   optionType: String,
@@ -68,6 +134,11 @@ const symbolSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  
+  lastDetailUpdate: {
+    type: Date,
+    default: null
   },
   
   lastUpdated: {
@@ -100,6 +171,13 @@ symbolSchema.statics.searchSymbols = function(prefix, limit = 10) {
   })
   .limit(limit)
   .sort({ symbol: 1 });
+};
+
+// Method to check if details need refresh (older than 1 hour)
+symbolSchema.methods.needsDetailRefresh = function() {
+  if (!this.lastDetailUpdate) return true;
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  return this.lastDetailUpdate < oneHourAgo;
 };
 
 module.exports = mongoose.model('Symbol', symbolSchema);

@@ -1,5 +1,6 @@
 const Quote = require('../models/Quote');
 const Symbol = require('../models/Symbol');
+const symbolService = require('./symbolService');
 const axios = require('axios');
 const logger = require('../utils/logger');
 const config = require('../config/environment');
@@ -23,7 +24,7 @@ class QuoteService {
         }
       }
       
-      // Fetch fresh quote from Questrade
+      // Fetch fresh quote from Questrade with symbol details
       const quote = await this.fetchQuoteFromQuestrade(symbol);
       
       // Save to cache
@@ -58,8 +59,8 @@ class QuoteService {
         // Get first available person token
         const person = await this.getAvailablePerson();
         
-        // Get symbol ID
-        const symbolData = await this.getSymbolId(symbol, person);
+        // Get symbol ID and details (includes prevDayClosePrice)
+        const symbolData = await this.getSymbolWithDetails(symbol, person);
         
         if (!symbolData) {
           throw new Error(`Symbol ${symbol} not found`);
@@ -83,7 +84,8 @@ class QuoteService {
         
         const questradeQuote = quoteResponse.data.quotes[0];
         
-        return this.transformQuestradeQuote(questradeQuote);
+        // Transform with symbol details for accurate day change
+        return this.transformQuestradeQuote(questradeQuote, symbolData);
       } catch (error) {
         // Extract meaningful error information
         const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
@@ -105,11 +107,14 @@ class QuoteService {
       try {
         const person = await this.getAvailablePerson();
         
-        // Get symbol IDs
+        // Get symbol IDs and details for all symbols
+        const symbolDataMap = new Map();
         const symbolIds = [];
+        
         for (const symbol of symbols) {
-          const symbolData = await this.getSymbolId(symbol, person);
+          const symbolData = await this.getSymbolWithDetails(symbol, person);
           if (symbolData) {
+            symbolDataMap.set(symbolData.symbolId, symbolData);
             symbolIds.push(symbolData.symbolId);
           }
         }
@@ -134,7 +139,11 @@ class QuoteService {
           }
         );
         
-        return quoteResponse.data.quotes.map(q => this.transformQuestradeQuote(q));
+        // Transform each quote with its symbol details
+        return quoteResponse.data.quotes.map(q => {
+          const symbolData = symbolDataMap.get(q.symbolId);
+          return this.transformQuestradeQuote(q, symbolData);
+        });
       } catch (error) {
         const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
         logger.error('Failed to fetch multiple quotes from Questrade', {
@@ -146,16 +155,37 @@ class QuoteService {
     });
   }
 
-  async getSymbolId(symbol, person) {
+  async getSymbolWithDetails(symbol, person) {
     try {
-      // Check local database first
+      // First check if we have the symbol with recent details in our database
       let symbolData = await Symbol.findOne({ symbol: symbol.toUpperCase() });
       
-      if (symbolData) {
-        return symbolData;
+      // If we don't have it or it needs refresh, fetch from Questrade
+      if (!symbolData || symbolData.needsDetailRefresh()) {
+        symbolData = await symbolService.getSymbolDetailsBySymbol(symbol, true);
       }
       
-      // Search in Questrade
+      // If still no symbol data, try to search and get it
+      if (!symbolData) {
+        const searchResults = await this.searchSymbolInQuestrade(symbol, person);
+        if (searchResults && searchResults.length > 0) {
+          const exactMatch = searchResults.find(s => s.symbol === symbol.toUpperCase());
+          if (exactMatch && exactMatch.symbolId) {
+            // Fetch detailed data
+            symbolData = await symbolService.getSymbolDetails(exactMatch.symbolId, true);
+          }
+        }
+      }
+      
+      return symbolData;
+    } catch (error) {
+      logger.error(`Failed to get symbol with details for ${symbol}:`, error);
+      return null;
+    }
+  }
+
+  async searchSymbolInQuestrade(symbol, person) {
+    try {
       const response = await axios.get(
         `${this.authApiUrl}/auth/access-token/${person}`
       );
@@ -171,28 +201,17 @@ class QuoteService {
         }
       );
       
-      const symbols = searchResponse.data.symbols || [];
-      const exactMatch = symbols.find(s => s.symbol === symbol.toUpperCase());
-      
-      if (exactMatch) {
-        // Save to database
-        symbolData = await Symbol.findOneAndUpdate(
-          { symbol: exactMatch.symbol },
-          {
-            symbol: exactMatch.symbol,
-            symbolId: exactMatch.symbolId,
-            description: exactMatch.description,
-            securityType: exactMatch.securityType,
-            exchange: exactMatch.exchange,
-            currency: exactMatch.currency
-          },
-          { upsert: true, new: true }
-        );
-        
-        return symbolData;
-      }
-      
-      return null;
+      return searchResponse.data.symbols || [];
+    } catch (error) {
+      logger.error(`Failed to search symbol ${symbol}:`, error);
+      return [];
+    }
+  }
+
+  async getSymbolId(symbol, person) {
+    try {
+      const symbolData = await this.getSymbolWithDetails(symbol, person);
+      return symbolData;
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
       logger.error(`Failed to get symbol ID for ${symbol}`, {
@@ -238,103 +257,85 @@ class QuoteService {
     }
   }
 
-  // ... rest of the methods remain the same ...
-
   // Helper function to safely parse numbers
   safeParseNumber(value, defaultValue = 0) {
     if (value === undefined || value === null) {
       return defaultValue;
     }
     const parsed = Number(value);
-    return isNaN(parsed) || !isFinite(parsed) ? defaultValue : parsed;
+    return (isNaN(parsed) || !isFinite(parsed)) ? defaultValue : parsed;
   }
 
-transformQuestradeQuote(questradeQuote) {
-  // Safely parse all numeric values first
-  const lastTradePrice = this.safeParseNumber(questradeQuote.lastTradePrice);
-  const previousClosePrice = this.safeParseNumber(questradeQuote.previousClosePrice);
-  
-  // Calculate change and changePercent with NaN protection
-  let change = 0;
-  let changePercent = 0;
-  
-  // Debug logging for troubleshooting
-  logger.debug(`Transforming quote for ${questradeQuote.symbol}:`, {
-    lastTradePrice,
-    previousClosePrice,
-    questradeChange: questradeQuote.change,
-    questradeChangePercent: questradeQuote.changePercent
-  });
-  
-  // First check if Questrade provides these values directly
-  // Note: Questrade API typically provides these fields
-  if (questradeQuote.change !== undefined && questradeQuote.change !== null) {
-    change = this.safeParseNumber(questradeQuote.change);
-  } else if (lastTradePrice > 0 && previousClosePrice > 0) {
-    // Calculate change only if we have valid prices
-    change = lastTradePrice - previousClosePrice;
-    // Ensure change is not NaN
-    if (isNaN(change) || !isFinite(change)) {
-      change = 0;
+  transformQuestradeQuote(questradeQuote, symbolData) {
+    // Safely parse all numeric values first
+    const lastTradePrice = this.safeParseNumber(questradeQuote.lastTradePrice);
+    
+    // Get previous close price from symbol details (this is the key!)
+    const previousClosePrice = symbolData ? this.safeParseNumber(symbolData.prevDayClosePrice) : 0;
+    
+    // Calculate proper day change using previous close price
+    let dayChange = 0;
+    let dayChangePercent = 0;
+    
+    logger.debug(`Transforming quote for ${questradeQuote.symbol}:`, {
+      lastTradePrice,
+      previousClosePrice,
+      symbolDataAvailable: !!symbolData
+    });
+    
+    // Calculate day change from previous close
+    if (lastTradePrice > 0 && previousClosePrice > 0) {
+      dayChange = lastTradePrice - previousClosePrice;
+      dayChangePercent = (dayChange / previousClosePrice) * 100;
+      
+      // Ensure no NaN or Infinity
+      if (isNaN(dayChange) || !isFinite(dayChange)) {
+        dayChange = 0;
+      }
+      if (isNaN(dayChangePercent) || !isFinite(dayChangePercent)) {
+        dayChangePercent = 0;
+      }
     }
+    
+    // Round to reasonable precision
+    dayChange = Math.round(dayChange * 100) / 100;
+    dayChangePercent = Math.round(dayChangePercent * 100) / 100;
+    
+    return {
+      symbol: questradeQuote.symbol,
+      symbolId: this.safeParseNumber(questradeQuote.symbolId, 0),
+      lastTradePrice: lastTradePrice,
+      lastTradeSize: this.safeParseNumber(questradeQuote.lastTradeSize),
+      lastTradeTick: questradeQuote.lastTradeTick,
+      lastTradeTime: questradeQuote.lastTradeTime ? new Date(questradeQuote.lastTradeTime) : null,
+      bidPrice: this.safeParseNumber(questradeQuote.bidPrice),
+      bidSize: this.safeParseNumber(questradeQuote.bidSize),
+      askPrice: this.safeParseNumber(questradeQuote.askPrice),
+      askSize: this.safeParseNumber(questradeQuote.askSize),
+      openPrice: this.safeParseNumber(questradeQuote.openPrice),
+      highPrice: this.safeParseNumber(questradeQuote.highPrice),
+      lowPrice: this.safeParseNumber(questradeQuote.lowPrice),
+      closePrice: this.safeParseNumber(questradeQuote.closePrice),
+      previousClosePrice: previousClosePrice,  // This comes from symbol details!
+      dayChange: dayChange,  // Calculated from prev close
+      dayChangePercent: dayChangePercent,  // Calculated from prev close
+      volume: this.safeParseNumber(questradeQuote.volume),
+      averageVolume: symbolData ? this.safeParseNumber(symbolData.averageVol20Days) : 0,
+      volumeWeightedAveragePrice: this.safeParseNumber(questradeQuote.VWAP),
+      week52High: symbolData ? this.safeParseNumber(symbolData.highPrice52) : 0,
+      week52Low: symbolData ? this.safeParseNumber(symbolData.lowPrice52) : 0,
+      marketCap: symbolData ? this.safeParseNumber(symbolData.marketCap) : 0,
+      eps: symbolData ? this.safeParseNumber(symbolData.eps) : 0,
+      pe: symbolData ? this.safeParseNumber(symbolData.pe) : 0,
+      dividend: symbolData ? this.safeParseNumber(symbolData.dividend) : 0,
+      yield: symbolData ? this.safeParseNumber(symbolData.yield) : 0,
+      exchange: questradeQuote.exchange,
+      isHalted: questradeQuote.isHalted || false,
+      delay: this.safeParseNumber(questradeQuote.delay),
+      isRealTime: !questradeQuote.delay || questradeQuote.delay === 0,
+      lastUpdated: new Date()
+    };
   }
-  
-  // Check for changePercent from Questrade or calculate it
-  if (questradeQuote.changePercent !== undefined && questradeQuote.changePercent !== null) {
-    changePercent = this.safeParseNumber(questradeQuote.changePercent);
-  } else if (previousClosePrice > 0 && !isNaN(change)) {
-    // Calculate percentage change only with valid values
-    changePercent = (change / previousClosePrice) * 100;
-    // Ensure changePercent is not NaN or Infinity
-    if (isNaN(changePercent) || !isFinite(changePercent)) {
-      changePercent = 0;
-    }
-  }
-  
-  // Round to reasonable precision to avoid floating point issues
-  change = Math.round(change * 100) / 100;
-  changePercent = Math.round(changePercent * 100) / 100;
-  
-  // Also handle day change if provided separately
-  const dayChange = questradeQuote.dayChange !== undefined 
-    ? this.safeParseNumber(questradeQuote.dayChange) 
-    : change;
-  const dayChangePercent = questradeQuote.dayChangePercent !== undefined 
-    ? this.safeParseNumber(questradeQuote.dayChangePercent) 
-    : changePercent;
-  
-  return {
-    symbol: questradeQuote.symbol,
-    symbolId: this.safeParseNumber(questradeQuote.symbolId, 0),
-    lastTradePrice: lastTradePrice,
-    lastTradeSize: this.safeParseNumber(questradeQuote.lastTradeSize),
-    lastTradeTick: questradeQuote.lastTradeTick,
-    lastTradeTime: questradeQuote.lastTradeTime ? new Date(questradeQuote.lastTradeTime) : null,
-    bidPrice: this.safeParseNumber(questradeQuote.bidPrice),
-    bidSize: this.safeParseNumber(questradeQuote.bidSize),
-    askPrice: this.safeParseNumber(questradeQuote.askPrice),
-    askSize: this.safeParseNumber(questradeQuote.askSize),
-    openPrice: this.safeParseNumber(questradeQuote.openPrice),
-    highPrice: this.safeParseNumber(questradeQuote.highPrice),
-    lowPrice: this.safeParseNumber(questradeQuote.lowPrice),
-    closePrice: this.safeParseNumber(questradeQuote.closePrice),
-    previousClosePrice: previousClosePrice,
-    change: change,
-    changePercent: changePercent,
-    dayChange: dayChange,
-    dayChangePercent: dayChangePercent,
-    volume: this.safeParseNumber(questradeQuote.volume),
-    averageVolume: this.safeParseNumber(questradeQuote.averageVolume),
-    volumeWeightedAveragePrice: this.safeParseNumber(questradeQuote.VWAP),
-    week52High: this.safeParseNumber(questradeQuote.high52w),
-    week52Low: this.safeParseNumber(questradeQuote.low52w),
-    exchange: questradeQuote.exchange,
-    isHalted: questradeQuote.isHalted || false,
-    delay: this.safeParseNumber(questradeQuote.delay),
-    isRealTime: !questradeQuote.delay || questradeQuote.delay === 0,
-    lastUpdated: new Date()
-  };
-}
 
   validateQuoteData(quote) {
     // Ensure all numeric fields are valid numbers
@@ -343,8 +344,9 @@ transformQuestradeQuote(questradeQuote) {
     const numericFields = [
       'symbolId', 'lastTradePrice', 'lastTradeSize', 'bidPrice', 'bidSize',
       'askPrice', 'askSize', 'openPrice', 'highPrice', 'lowPrice', 'closePrice',
-      'previousClosePrice', 'change', 'changePercent', 'volume', 'averageVolume',
-      'volumeWeightedAveragePrice', 'week52High', 'week52Low', 'delay'
+      'previousClosePrice', 'dayChange', 'dayChangePercent', 'volume', 'averageVolume',
+      'volumeWeightedAveragePrice', 'week52High', 'week52Low', 'delay',
+      'marketCap', 'eps', 'pe', 'dividend', 'yield'
     ];
     
     numericFields.forEach(field => {

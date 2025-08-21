@@ -101,6 +101,7 @@ const quoteSchema = new mongoose.Schema({
     }
   },
   
+  // Previous close price - IMPORTANT for day change calculation
   previousClosePrice: {
     type: Number,
     default: 0,
@@ -111,28 +112,8 @@ const quoteSchema = new mongoose.Schema({
       message: 'previousClosePrice must be a valid number'
     }
   },
-  change: {
-    type: Number,
-    default: 0,
-    validate: {
-      validator: function(v) {
-        return !isNaN(v) && isFinite(v);
-      },
-      message: 'change must be a valid number'
-    }
-  },
-  changePercent: {
-    type: Number,
-    default: 0,
-    validate: {
-      validator: function(v) {
-        return !isNaN(v) && isFinite(v);
-      },
-      message: 'changePercent must be a valid number'
-    }
-  },
   
-  // Day change fields (separate from overall change)
+  // Calculated day change fields
   dayChange: {
     type: Number,
     default: 0,
@@ -231,11 +212,11 @@ quoteSchema.index({ lastUpdated: 1 }, { expireAfterSeconds: 86400 });
 
 // Virtual for price change indicators
 quoteSchema.virtual('isUp').get(function() {
-  return this.change > 0;
+  return this.dayChange > 0;
 });
 
 quoteSchema.virtual('isDown').get(function() {
-  return this.change < 0;
+  return this.dayChange < 0;
 });
 
 // Method to check if quote is stale
@@ -260,8 +241,7 @@ quoteSchema.statics.bulkUpdateQuotes = async function(quotes) {
     const numericFields = [
       'symbolId', 'lastTradePrice', 'bidPrice', 'askPrice',
       'openPrice', 'highPrice', 'lowPrice', 'closePrice',
-      'previousClosePrice', 'change', 'changePercent', 
-      'dayChange', 'dayChangePercent', 'volume'
+      'previousClosePrice', 'dayChange', 'dayChangePercent', 'volume'
     ];
     
     numericFields.forEach(field => {
@@ -312,45 +292,26 @@ quoteSchema.pre('save', function(next) {
   this.closePrice = validateNumber(this.closePrice);
   this.volume = validateNumber(this.volume);
   
-  // Ensure change and changePercent are calculated if not set or invalid
-  if (this.change === undefined || this.change === null || isNaN(this.change) || !isFinite(this.change)) {
-    if (this.lastTradePrice > 0 && this.previousClosePrice > 0) {
-      this.change = this.lastTradePrice - this.previousClosePrice;
-      // Final check for NaN
-      if (isNaN(this.change) || !isFinite(this.change)) {
-        this.change = 0;
-      }
-    } else {
-      this.change = 0;
+  // Calculate day change if we have both prices
+  if (this.lastTradePrice > 0 && this.previousClosePrice > 0) {
+    this.dayChange = this.lastTradePrice - this.previousClosePrice;
+    this.dayChangePercent = (this.dayChange / this.previousClosePrice) * 100;
+    
+    // Ensure no NaN or Infinity
+    if (isNaN(this.dayChange) || !isFinite(this.dayChange)) {
+      this.dayChange = 0;
     }
-  }
-  
-  if (this.changePercent === undefined || this.changePercent === null || isNaN(this.changePercent) || !isFinite(this.changePercent)) {
-    if (this.previousClosePrice > 0 && this.change !== undefined && !isNaN(this.change)) {
-      this.changePercent = (this.change / this.previousClosePrice) * 100;
-      // Final check for NaN or Infinity
-      if (isNaN(this.changePercent) || !isFinite(this.changePercent)) {
-        this.changePercent = 0;
-      }
-    } else {
-      this.changePercent = 0;
+    if (isNaN(this.dayChangePercent) || !isFinite(this.dayChangePercent)) {
+      this.dayChangePercent = 0;
     }
+    
+    // Round to reasonable precision
+    this.dayChange = Math.round(this.dayChange * 100) / 100;
+    this.dayChangePercent = Math.round(this.dayChangePercent * 100) / 100;
+  } else {
+    this.dayChange = 0;
+    this.dayChangePercent = 0;
   }
-  
-  // Handle day change fields - if not set, use regular change
-  if (this.dayChange === undefined || this.dayChange === null || isNaN(this.dayChange)) {
-    this.dayChange = this.change || 0;
-  }
-  
-  if (this.dayChangePercent === undefined || this.dayChangePercent === null || isNaN(this.dayChangePercent)) {
-    this.dayChangePercent = this.changePercent || 0;
-  }
-  
-  // Round to reasonable precision
-  this.change = Math.round(this.change * 100) / 100;
-  this.changePercent = Math.round(this.changePercent * 100) / 100;
-  this.dayChange = Math.round(this.dayChange * 100) / 100;
-  this.dayChangePercent = Math.round(this.dayChangePercent * 100) / 100;
   
   next();
 });
@@ -360,7 +321,7 @@ quoteSchema.pre('validate', function(next) {
   const numericFields = [
     'symbolId', 'lastTradePrice', 'lastTradeSize', 'bidPrice', 'bidSize',
     'askPrice', 'askSize', 'openPrice', 'highPrice', 'lowPrice', 'closePrice',
-    'previousClosePrice', 'change', 'changePercent', 'dayChange', 'dayChangePercent',
+    'previousClosePrice', 'dayChange', 'dayChangePercent',
     'volume', 'averageVolume', 'volumeWeightedAveragePrice', 'week52High', 'week52Low', 'delay'
   ];
   

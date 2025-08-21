@@ -123,35 +123,48 @@ class MarketAPISetup {
   }
 
   async testQuoteRetrieval() {
-    console.log('\n=== Test Quote Retrieval ===');
-    
-    const symbol = await question('Enter symbol (e.g., AAPL, SPY): ');
-    
-    if (!symbol.trim()) {
-      console.log('❌ Symbol cannot be empty');
-      return;
-    }
-    
-    try {
-      console.log(`\n⏳ Fetching quote for ${symbol.toUpperCase()}...`);
-      
-      const response = await axios.get(`${this.apiUrl}/quotes/${symbol.toUpperCase()}`);
-      
-      if (response.data.success) {
-        const quote = response.data.data;
-        console.log("setup quote :- " + JSON.stringify(quote));
-        console.log('\n✅ Quote retrieved successfully!');
-        console.log(`  Symbol: ${quote.symbol}`);
-        console.log(`  Last Price: $${quote.lastTradePrice}`);
-        console.log(`  Volume: ${quote.volume?.toLocaleString()}`);
-        console.log(`  Bid: $${quote.bidPrice} x ${quote.bidSize}`);
-        console.log(`  Ask: $${quote.askPrice} x ${quote.askSize}`);
-        console.log(`  Day Change: ${quote.change >= 0 ? '+' : ''}${quote.change} (${quote.changePercent?.toFixed(2)}%)`);
-      }
-    } catch (error) {
-      console.log('❌ Failed to get quote:', error.response?.data?.error || error.message);
-    }
+  console.log('\n=== Test Quote Retrieval ===');
+  
+  const symbol = await question('Enter symbol (e.g., AAPL, SPY): ');
+  
+  if (!symbol.trim()) {
+    console.log('❌ Symbol cannot be empty');
+    return;
   }
+  
+  try {
+    console.log(`\n⏳ Fetching quote for ${symbol.toUpperCase()}...`);
+    
+    const response = await axios.get(`${this.apiUrl}/quotes/${symbol.toUpperCase()}`);
+    
+    if (response.data.success) {
+      const quote = response.data.data;
+      console.log('\n✅ Quote retrieved successfully!');
+      console.log(`  Symbol: ${quote.symbol}`);
+      console.log(`  Last Price: $${quote.lastTradePrice}`);
+      console.log(`  Previous Close: $${quote.previousClosePrice}`);
+      console.log(`  Day Change: ${quote.dayChange >= 0 ? '+' : ''}$${quote.dayChange.toFixed(2)} (${quote.dayChangePercent >= 0 ? '+' : ''}${quote.dayChangePercent.toFixed(2)}%)`);
+      console.log(`  Volume: ${quote.volume?.toLocaleString()}`);
+      console.log(`  Bid: $${quote.bidPrice} x ${quote.bidSize}`);
+      console.log(`  Ask: $${quote.askPrice} x ${quote.askSize}`);
+      console.log(`  Day Range: $${quote.lowPrice} - $${quote.highPrice}`);
+      console.log(`  52 Week Range: $${quote.week52Low} - $${quote.week52High}`);
+      
+      // Display additional data if available
+      if (quote.marketCap) {
+        console.log(`  Market Cap: $${(quote.marketCap / 1000000000).toFixed(2)}B`);
+      }
+      if (quote.pe) {
+        console.log(`  P/E Ratio: ${quote.pe.toFixed(2)}`);
+      }
+      if (quote.dividend && quote.yield) {
+        console.log(`  Dividend: $${quote.dividend.toFixed(2)} (${quote.yield.toFixed(2)}%)`);
+      }
+    }
+  } catch (error) {
+    console.log('❌ Failed to get quote:', error.response?.data?.error || error.message);
+  }
+}
 
   async searchSymbols() {
     console.log('\n=== Search Symbols ===');
