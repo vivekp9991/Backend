@@ -163,35 +163,78 @@ class QuoteService {
     });
   }
 
+  // Helper function to safely parse numbers
+  safeParseNumber(value, defaultValue = 0) {
+    if (value === undefined || value === null) {
+      return defaultValue;
+    }
+    const parsed = Number(value);
+    return isNaN(parsed) || !isFinite(parsed) ? defaultValue : parsed;
+  }
+
   transformQuestradeQuote(questradeQuote) {
+    // Safely parse all numeric values first
+    const lastTradePrice = this.safeParseNumber(questradeQuote.lastTradePrice);
+    const previousClosePrice = this.safeParseNumber(questradeQuote.previousClosePrice);
+    
+    // Calculate change and changePercent with NaN protection
+    let change = 0;
+    let changePercent = 0;
+    
+    // First check if Questrade provides these values directly
+    if (questradeQuote.change !== undefined && questradeQuote.change !== null) {
+      change = this.safeParseNumber(questradeQuote.change);
+    } else if (lastTradePrice > 0 && previousClosePrice > 0) {
+      // Calculate change only if we have valid prices
+      change = lastTradePrice - previousClosePrice;
+      // Ensure change is not NaN
+      if (isNaN(change) || !isFinite(change)) {
+        change = 0;
+      }
+    }
+    
+    // Check for changePercent from Questrade or calculate it
+    if (questradeQuote.changePercent !== undefined && questradeQuote.changePercent !== null) {
+      changePercent = this.safeParseNumber(questradeQuote.changePercent);
+    } else if (previousClosePrice > 0 && !isNaN(change)) {
+      // Calculate percentage change only with valid values
+      changePercent = (change / previousClosePrice) * 100;
+      // Ensure changePercent is not NaN or Infinity
+      if (isNaN(changePercent) || !isFinite(changePercent)) {
+        changePercent = 0;
+      }
+    }
+    
+    // Round to reasonable precision to avoid floating point issues
+    change = Math.round(change * 100) / 100;
+    changePercent = Math.round(changePercent * 100) / 100;
+    
     return {
       symbol: questradeQuote.symbol,
-      symbolId: questradeQuote.symbolId,
-      lastTradePrice: questradeQuote.lastTradePrice,
-      lastTradeSize: questradeQuote.lastTradeSize,
+      symbolId: this.safeParseNumber(questradeQuote.symbolId, 0),
+      lastTradePrice: lastTradePrice,
+      lastTradeSize: this.safeParseNumber(questradeQuote.lastTradeSize),
       lastTradeTick: questradeQuote.lastTradeTick,
       lastTradeTime: questradeQuote.lastTradeTime ? new Date(questradeQuote.lastTradeTime) : null,
-      bidPrice: questradeQuote.bidPrice,
-      bidSize: questradeQuote.bidSize,
-      askPrice: questradeQuote.askPrice,
-      askSize: questradeQuote.askSize,
-      openPrice: questradeQuote.openPrice,
-      highPrice: questradeQuote.highPrice,
-      lowPrice: questradeQuote.lowPrice,
-      closePrice: questradeQuote.closePrice,
-      previousClosePrice: questradeQuote.previousClosePrice,
-      change: questradeQuote.lastTradePrice - questradeQuote.previousClosePrice,
-      changePercent: questradeQuote.previousClosePrice > 0 
-        ? ((questradeQuote.lastTradePrice - questradeQuote.previousClosePrice) / questradeQuote.previousClosePrice) * 100 
-        : 0,
-      volume: questradeQuote.volume,
-      averageVolume: questradeQuote.averageVolume,
-      volumeWeightedAveragePrice: questradeQuote.VWAP,
-      week52High: questradeQuote.high52w,
-      week52Low: questradeQuote.low52w,
+      bidPrice: this.safeParseNumber(questradeQuote.bidPrice),
+      bidSize: this.safeParseNumber(questradeQuote.bidSize),
+      askPrice: this.safeParseNumber(questradeQuote.askPrice),
+      askSize: this.safeParseNumber(questradeQuote.askSize),
+      openPrice: this.safeParseNumber(questradeQuote.openPrice),
+      highPrice: this.safeParseNumber(questradeQuote.highPrice),
+      lowPrice: this.safeParseNumber(questradeQuote.lowPrice),
+      closePrice: this.safeParseNumber(questradeQuote.closePrice),
+      previousClosePrice: previousClosePrice,
+      change: change,
+      changePercent: changePercent,
+      volume: this.safeParseNumber(questradeQuote.volume),
+      averageVolume: this.safeParseNumber(questradeQuote.averageVolume),
+      volumeWeightedAveragePrice: this.safeParseNumber(questradeQuote.VWAP),
+      week52High: this.safeParseNumber(questradeQuote.high52w),
+      week52Low: this.safeParseNumber(questradeQuote.low52w),
       exchange: questradeQuote.exchange,
-      isHalted: questradeQuote.isHalted,
-      delay: questradeQuote.delay,
+      isHalted: questradeQuote.isHalted || false,
+      delay: this.safeParseNumber(questradeQuote.delay),
       isRealTime: !questradeQuote.delay || questradeQuote.delay === 0,
       lastUpdated: new Date()
     };
@@ -199,14 +242,38 @@ class QuoteService {
 
   async saveQuote(quote) {
     try {
+      // Validate quote data before saving
+      const validatedQuote = this.validateQuoteData(quote);
+      
       await Quote.findOneAndUpdate(
-        { symbol: quote.symbol },
-        quote,
-        { upsert: true, new: true }
+        { symbol: validatedQuote.symbol },
+        validatedQuote,
+        { upsert: true, new: true, runValidators: true }
       );
     } catch (error) {
       logger.error('Failed to save quote:', error);
+      logger.error('Quote data that failed:', JSON.stringify(quote));
     }
+  }
+
+  validateQuoteData(quote) {
+    // Ensure all numeric fields are valid numbers
+    const validated = { ...quote };
+    
+    const numericFields = [
+      'symbolId', 'lastTradePrice', 'lastTradeSize', 'bidPrice', 'bidSize',
+      'askPrice', 'askSize', 'openPrice', 'highPrice', 'lowPrice', 'closePrice',
+      'previousClosePrice', 'change', 'changePercent', 'volume', 'averageVolume',
+      'volumeWeightedAveragePrice', 'week52High', 'week52Low', 'delay'
+    ];
+    
+    numericFields.forEach(field => {
+      if (validated[field] !== undefined) {
+        validated[field] = this.safeParseNumber(validated[field], 0);
+      }
+    });
+    
+    return validated;
   }
 
   async getSymbolId(symbol, person) {
