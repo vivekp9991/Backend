@@ -1,0 +1,4 @@
+// src/templates/sms/alert.txt
+🚨 {{TYPE}} Alert: {{TITLE}}
+{{SYMBOL}}: {{VALUE}} ({{CHANGE}})
+{{MESSAGE}}

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Update</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .content {
+            padding: 30px;
+        }
+        .update-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .change-item {
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .change-item:last-child {
+            border-bottom: none;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .footer {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📈 Portfolio Update</h1>
+            <p>{{updateTitle}}</p>
+        </div>
+        
+        <div class="content">
+            <p>Hi {{userName}},</p>
+            
+            <div class="update-box">
+                <h2>{{updateType}}</h2>
+                <p>{{updateMessage}}</p>
+                
+                {{#if changes}}
+                <div class="changes">
+                    {{#each changes}}
+                    <div class="change-item">
+                        {{this}}
+                    </div>
+                    {{/each}}
+                </div>
+                {{/if}}
+                
+                <p><small>Updated: {{timestamp}}</small></p>
+            </div>
+            
+            <center>
+                <a href="{{portfolioUrl}}" class="button">View Portfolio</a>
+            </center>
+        </div>
+        
+        <div class="footer">
+            <p>You're receiving this update based on your notification preferences.</p>
+            <p><a href="{{portfolioUrl}}/settings">Manage Settings</a></p>
+        </div>
+    </div>
+</body>
+</html>

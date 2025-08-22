@@ -1,5 +1,149 @@
-<!-- alert.html -->
-<h1>Alert: {{alertType}}</h1>
-<p>{{message}}</p>
-<p>Current Value: {{currentValue}}</p>
-<p>Threshold: {{threshold}}</p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Alert</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .alert-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        .severity-critical { background: linear-gradient(135deg, #f93b1d 0%, #ea1e63 100%); }
+        .severity-high { background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%); }
+        .severity-medium { background: linear-gradient(135deg, #ffd89b 0%, #19547b 100%); }
+        .content {
+            padding: 30px;
+        }
+        .alert-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .metric:last-child {
+            border-bottom: none;
+        }
+        .metric-label {
+            color: #6c757d;
+        }
+        .metric-value {
+            font-weight: 600;
+            color: #212529;
+        }
+        .positive { color: #28a745; }
+        .negative { color: #dc3545; }
+        .button {
+            display: inline-block;
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .footer {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header {{#if (eq alertSeverity 'critical')}}severity-critical{{/if}} {{#if (eq alertSeverity 'high')}}severity-high{{/if}} {{#if (eq alertSeverity 'medium')}}severity-medium{{/if}}">
+            <div class="alert-icon">🚨</div>
+            <h1>{{alertType}} Alert</h1>
+            <p>{{alertTitle}}</p>
+        </div>
+        
+        <div class="content">
+            <div class="alert-box">
+                <h2>Alert Details</h2>
+                <p><strong>{{alertMessage}}</strong></p>
+                
+                <div class="metrics">
+                    {{#if symbol}}
+                    <div class="metric">
+                        <span class="metric-label">Symbol</span>
+                        <span class="metric-value">{{symbol}}</span>
+                    </div>
+                    {{/if}}
+                    
+                    {{#if currentValue}}
+                    <div class="metric">
+                        <span class="metric-label">Current Value</span>
+                        <span class="metric-value">{{currentValue}}</span>
+                    </div>
+                    {{/if}}
+                    
+                    {{#if thresholdValue}}
+                    <div class="metric">
+                        <span class="metric-label">Threshold</span>
+                        <span class="metric-value">{{thresholdValue}}</span>
+                    </div>
+                    {{/if}}
+                    
+                    {{#if percentageChange}}
+                    <div class="metric">
+                        <span class="metric-label">Change</span>
+                        <span class="metric-value {{#if (gt percentageChange 0)}}positive{{else}}negative{{/if}}">
+                            {{percentageChange}}
+                        </span>
+                    </div>
+                    {{/if}}
+                    
+                    <div class="metric">
+                        <span class="metric-label">Triggered At</span>
+                        <span class="metric-value">{{timestamp}}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <center>
+                <a href="{{portfolioUrl}}" class="button">View Portfolio</a>
+            </center>
+        </div>
+        
+        <div class="footer">
+            <p>You're receiving this because you have alerts enabled for your portfolio.</p>
+            <p><a href="{{unsubscribeUrl}}">Manage Notification Preferences</a></p>
+        </div>
+    </div>
+</body>
+</html>
