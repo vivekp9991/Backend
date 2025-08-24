@@ -3,6 +3,9 @@ const axios = require('axios');
 const logger = require('../utils/logger');
 const config = require('../config/environment');
 const Decimal = require('decimal.js');
+const currencyService = require('./currencyService');
+const dividendService = require('./dividendService');
+const marketDataService = require('./marketDataService');
 
 class PortfolioCalculator {
   constructor() {
@@ -21,6 +24,273 @@ class PortfolioCalculator {
       throw new Error(`Failed to fetch data from Sync API: ${error.message}`);
     }
   }
+
+  /**
+   * Get all persons from Auth API
+   */
+  async getAllPersons() {
+    try {
+      const authApiUrl = config.services.authApiUrl || 'http://localhost:4001/api';
+      const response = await axios.get(`${authApiUrl}/persons`);
+      
+      if (response.data && response.data.success) {
+        return response.data.data.filter(p => p.isActive);
+      }
+      
+      return [];
+    } catch (error) {
+      logger.error('[PORTFOLIO] Failed to fetch persons:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Get all positions for all persons (main method for UI)
+   */
+  async getAllPersonsPositions(viewMode = 'all', aggregate = true) {
+    try {
+      logger.info(`[PORTFOLIO] Getting positions for viewMode: ${viewMode}, aggregate: ${aggregate}`);
+      
+      // Get all active persons
+      const persons = await this.getAllPersons();
+      logger.info(`[PORTFOLIO] Found ${persons.length} active persons`);
+      
+      if (persons.length === 0) {
+        return [];
+      }
+
+      // Fetch all positions and accounts
+      const allPositions = [];
+      const accountsMap = new Map();
+
+      for (const person of persons) {
+        try {
+          // Fetch positions for this person
+          const positionsResponse = await this.fetchFromSyncApi('/positions/person/' + person.personName, {
+            aggregated: 'false' // Get raw positions, not aggregated
+          });
+
+          if (positionsResponse.success && positionsResponse.data) {
+            // Add personName to each position
+            const personPositions = positionsResponse.data.map(pos => ({
+              ...pos,
+              personName: person.personName
+            }));
+            allPositions.push(...personPositions);
+          }
+
+          // Fetch accounts for this person
+          const accountsResponse = await this.fetchFromSyncApi('/accounts/' + person.personName);
+          
+          if (accountsResponse.success && accountsResponse.data) {
+            accountsResponse.data.forEach(account => {
+              accountsMap.set(account.accountId, {
+                ...account,
+                personName: person.personName
+              });
+            });
+          }
+        } catch (error) {
+          logger.error(`[PORTFOLIO] Failed to fetch data for ${person.personName}:`, error.message);
+        }
+      }
+
+      logger.info(`[PORTFOLIO] Total positions fetched: ${allPositions.length}`);
+
+      if (aggregate) {
+        return await this.aggregatePositions(allPositions, accountsMap);
+      } else {
+        return await this.formatIndividualPositions(allPositions, accountsMap);
+      }
+    } catch (error) {
+      logger.error('[PORTFOLIO] Failed to get all persons positions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Aggregate positions by symbol across all accounts
+   */
+  async aggregatePositions(positions, accountsMap) {
+    try {
+      // Group positions by symbol
+      const symbolGroups = new Map();
+
+      for (const position of positions) {
+        const symbol = position.symbol;
+        
+        if (!symbolGroups.has(symbol)) {
+          symbolGroups.set(symbol, {
+            positions: [],
+            totalQuantity: new Decimal(0),
+            totalCost: new Decimal(0),
+            accounts: new Set(),
+            accountTypes: new Set(),
+            persons: new Set()
+          });
+        }
+
+        const group = symbolGroups.get(symbol);
+        group.positions.push(position);
+        group.totalQuantity = group.totalQuantity.plus(position.openQuantity || 0);
+        group.totalCost = group.totalCost.plus(position.totalCost || 0);
+        
+        const account = accountsMap.get(position.accountId);
+        if (account) {
+          group.accounts.add(position.accountId);
+          group.accountTypes.add(account.type);
+          group.persons.add(position.personName);
+        }
+      }
+
+      // Get all unique symbols for batch price fetch
+      const symbols = Array.from(symbolGroups.keys());
+      const priceData = await marketDataService.getMultiplePrices(symbols);
+
+      // Build aggregated positions
+      const aggregatedPositions = [];
+
+      for (const [symbol, group] of symbolGroups.entries()) {
+        const totalQuantity = group.totalQuantity.toNumber();
+        const totalCost = group.totalCost.toNumber();
+        const averageEntryPrice = totalQuantity > 0 ? totalCost / totalQuantity : 0;
+
+        // Get current price data
+        const currentPriceData = priceData[symbol] || {};
+        const currentPrice = currentPriceData.currentPrice || group.positions[0]?.currentPrice || 0;
+        const openPrice = currentPriceData.openPrice || currentPrice;
+
+        // Determine currency (assume USD for now, could be enhanced)
+        const currency = symbol.includes('.TO') ? 'CAD' : 'USD';
+
+        // Calculate dividend data
+        const dividendData = await dividendService.calculateDividendData(
+          symbol,
+          group.positions,
+          currentPrice
+        );
+
+        // Build individual positions array
+        const individualPositions = [];
+        for (const pos of group.positions) {
+          const account = accountsMap.get(pos.accountId);
+          if (account) {
+            individualPositions.push({
+              accountName: `${account.type}-${account.number}`,
+              accountType: account.type,
+              personName: pos.personName,
+              shares: pos.openQuantity,
+              avgCost: pos.averageEntryPrice || 0,
+              marketValue: pos.currentMarketValue || (pos.openQuantity * currentPrice),
+              currency: currency
+            });
+          }
+        }
+
+        // Build the aggregated position
+        const aggregatedPosition = {
+          symbol: symbol,
+          currency: currency,
+          openQuantity: totalQuantity,
+          averageEntryPrice: Math.round(averageEntryPrice * 100) / 100,
+          currentPrice: Math.round(currentPrice * 100) / 100,
+          openPrice: Math.round(openPrice * 100) / 100,
+          dividendData: dividendData,
+          isAggregated: group.accounts.size > 1,
+          sourceAccounts: Array.from(group.accountTypes),
+          accountCount: group.accounts.size,
+          individualPositions: individualPositions
+        };
+
+        aggregatedPositions.push(aggregatedPosition);
+      }
+
+      // Sort by market value (descending)
+      aggregatedPositions.sort((a, b) => {
+        const aValue = a.openQuantity * a.currentPrice;
+        const bValue = b.openQuantity * b.currentPrice;
+        return bValue - aValue;
+      });
+
+      logger.info(`[PORTFOLIO] Aggregated ${positions.length} positions into ${aggregatedPositions.length} symbols`);
+
+      return aggregatedPositions;
+    } catch (error) {
+      logger.error('[PORTFOLIO] Failed to aggregate positions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Format individual positions without aggregation
+   */
+  async formatIndividualPositions(positions, accountsMap) {
+    try {
+      // Get all unique symbols for batch price fetch
+      const symbols = [...new Set(positions.map(p => p.symbol))];
+      const priceData = await marketDataService.getMultiplePrices(symbols);
+
+      const formattedPositions = [];
+
+      for (const position of positions) {
+        const account = accountsMap.get(position.accountId);
+        const symbol = position.symbol;
+        
+        // Get current price data
+        const currentPriceData = priceData[symbol] || {};
+        const currentPrice = currentPriceData.currentPrice || position.currentPrice || 0;
+        const openPrice = currentPriceData.openPrice || currentPrice;
+
+        // Determine currency
+        const currency = symbol.includes('.TO') ? 'CAD' : 'USD';
+
+        // Calculate simple dividend data for individual position
+        const dividendData = await dividendService.calculateDividendData(
+          symbol,
+          [position],
+          currentPrice
+        );
+
+        const formattedPosition = {
+          symbol: symbol,
+          currency: currency,
+          openQuantity: position.openQuantity,
+          averageEntryPrice: Math.round((position.averageEntryPrice || 0) * 100) / 100,
+          currentPrice: Math.round(currentPrice * 100) / 100,
+          openPrice: Math.round(openPrice * 100) / 100,
+          dividendData: dividendData,
+          isAggregated: false,
+          sourceAccounts: account ? [account.type] : [],
+          accountCount: 1,
+          individualPositions: account ? [{
+            accountName: `${account.type}-${account.number}`,
+            accountType: account.type,
+            personName: position.personName,
+            shares: position.openQuantity,
+            avgCost: position.averageEntryPrice || 0,
+            marketValue: position.currentMarketValue || (position.openQuantity * currentPrice),
+            currency: currency
+          }] : []
+        };
+
+        formattedPositions.push(formattedPosition);
+      }
+
+      // Sort by market value (descending)
+      formattedPositions.sort((a, b) => {
+        const aValue = a.openQuantity * a.currentPrice;
+        const bValue = b.openQuantity * b.currentPrice;
+        return bValue - aValue;
+      });
+
+      return formattedPositions;
+    } catch (error) {
+      logger.error('[PORTFOLIO] Failed to format individual positions:', error);
+      throw error;
+    }
+  }
+
+  // ... (keep all existing methods from the original file)
 
   /**
    * Get complete portfolio summary

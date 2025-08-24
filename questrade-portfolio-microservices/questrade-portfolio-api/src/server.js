@@ -9,6 +9,7 @@ const database = require('./config/database');
 const logger = require('./utils/logger');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const cache = require('./middleware/cache');
+const currencyService = require('./services/currencyService'); // ADD THIS
 
 // Import routes
 const portfolioRoutes = require('./routes/portfolio');
@@ -99,10 +100,12 @@ app.get('/api', (req, res) => {
     description: 'Portfolio Calculations and Analytics Service',
     endpoints: {
       portfolio: {
+        'GET /api/portfolio/positions': 'Get all positions (UI compatible)', // ADD THIS
         'GET /api/portfolio/:personName': 'Get complete portfolio overview',
         'GET /api/portfolio/:personName/summary': 'Get portfolio summary',
         'GET /api/portfolio/:personName/holdings': 'Get all holdings',
-        'GET /api/portfolio/:personName/value': 'Get total portfolio value'
+        'GET /api/portfolio/:personName/value': 'Get total portfolio value',
+        'GET /api/portfolio/:personName/positions': 'Get person positions'
       },
       performance: {
         'GET /api/performance/:personName': 'Get performance metrics',
@@ -155,6 +158,10 @@ async function startServer() {
       logger.info('Cache initialized');
     }
     
+    // Start currency service scheduled updates - ADD THIS
+    currencyService.startScheduledUpdates();
+    logger.info('Currency service initialized with scheduled updates');
+    
     // Start server
     const PORT = config.server.port;
     const server = app.listen(PORT, () => {
@@ -162,6 +169,7 @@ async function startServer() {
       logger.info(`📊 Environment: ${config.server.environment}`);
       logger.info(`🔗 API available at: http://localhost:${PORT}/api`);
       logger.info(`💾 Cache: ${config.cache.enabled ? 'Enabled' : 'Disabled'}`);
+      logger.info(`💱 Currency updates: Every 5 minutes`); // ADD THIS
     });
 
     // Graceful shutdown

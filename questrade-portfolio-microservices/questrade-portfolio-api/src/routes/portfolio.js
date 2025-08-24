@@ -6,7 +6,37 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { validatePerson } = require('../middleware/validateRequest');
 const logger = require('../utils/logger');
 
-// Get complete portfolio overview
+// NEW ENDPOINT: Get positions for all persons (UI compatible)
+router.get('/positions', asyncHandler(async (req, res) => {
+  const { viewMode = 'all', aggregate = 'true' } = req.query;
+  
+  logger.info(`[ROUTE] GET /portfolio/positions - viewMode: ${viewMode}, aggregate: ${aggregate}`);
+  
+  // Convert aggregate string to boolean
+  const shouldAggregate = aggregate === 'true' || aggregate === true;
+  
+  try {
+    const positions = await portfolioCalculator.getAllPersonsPositions(viewMode, shouldAggregate);
+    
+    logger.info(`[ROUTE] Returning ${positions.length} positions`);
+    
+    res.json({
+      success: true,
+      viewMode,
+      aggregate: shouldAggregate,
+      count: positions.length,
+      data: positions
+    });
+  } catch (error) {
+    logger.error('[ROUTE] Failed to get positions:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch positions'
+    });
+  }
+}));
+
+// Get complete portfolio overview for a specific person
 router.get('/:personName', validatePerson, asyncHandler(async (req, res) => {
   const { personName } = req.params;
   
@@ -18,7 +48,7 @@ router.get('/:personName', validatePerson, asyncHandler(async (req, res) => {
   });
 }));
 
-// Get portfolio summary
+// Get portfolio summary for a specific person
 router.get('/:personName/summary', validatePerson, asyncHandler(async (req, res) => {
   const { personName } = req.params;
   
@@ -36,7 +66,7 @@ router.get('/:personName/summary', validatePerson, asyncHandler(async (req, res)
   });
 }));
 
-// Get all holdings
+// Get all holdings for a specific person
 router.get('/:personName/holdings', validatePerson, asyncHandler(async (req, res) => {
   const { personName } = req.params;
   const { sortBy = 'value', order = 'desc' } = req.query;
@@ -73,7 +103,7 @@ router.get('/:personName/holdings', validatePerson, asyncHandler(async (req, res
   });
 }));
 
-// Get portfolio value
+// Get portfolio value for a specific person
 router.get('/:personName/value', validatePerson, asyncHandler(async (req, res) => {
   const { personName } = req.params;
   
@@ -85,7 +115,35 @@ router.get('/:personName/value', validatePerson, asyncHandler(async (req, res) =
   });
 }));
 
-// Create new snapshot
+// Get positions for a specific person
+router.get('/:personName/positions', validatePerson, asyncHandler(async (req, res) => {
+  const { personName } = req.params;
+  const { aggregate = 'true' } = req.query;
+  
+  // For single person, use the existing holdings calculation
+  const holdings = await portfolioCalculator.calculateHoldings(personName);
+  
+  // Transform to match the UI interface
+  const positions = holdings.holdings.map(holding => ({
+    symbol: holding.symbol,
+    currency: holding.symbol.includes('.TO') ? 'CAD' : 'USD',
+    openQuantity: holding.quantity,
+    averageEntryPrice: holding.averagePrice,
+    currentPrice: holding.marketValue / holding.quantity,
+    openPrice: holding.marketValue / holding.quantity, // Simplified
+    isAggregated: holding.accountCount > 1,
+    accountCount: holding.accountCount
+  }));
+  
+  res.json({
+    success: true,
+    personName,
+    aggregate: aggregate === 'true',
+    data: positions
+  });
+}));
+
+// Create new snapshot for a specific person
 router.post('/:personName/snapshot', validatePerson, asyncHandler(async (req, res) => {
   const { personName } = req.params;
   
