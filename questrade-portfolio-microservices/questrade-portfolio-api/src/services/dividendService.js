@@ -6,6 +6,8 @@ const moment = require('moment');
 class DividendService {
   constructor() {
     this.syncApiUrl = config.services.syncApiUrl;
+    this.dividendCache = new Map(); // In-memory cache for dividend data
+    this.cacheTimeout = 24 * 60 * 60 * 1000; // 24 hours
   }
 
   /**
@@ -13,25 +15,55 @@ class DividendService {
    */
   async fetchDividendActivities(personName, symbol = null) {
     try {
-      const params = {
-        personName,
-        type: 'Dividend',
-        limit: 1000
-      };
-
-      if (symbol) {
-        params.symbol = symbol;
+      // Check cache first
+      const cacheKey = `${personName}_${symbol || 'all'}`;
+      const cached = this.dividendCache.get(cacheKey);
+      
+      if (cached && (Date.now() - cached.timestamp < this.cacheTimeout)) {
+        logger.debug(`[DIVIDEND] Using cached data for ${cacheKey}`);
+        return cached.data;
       }
-
-      const response = await axios.get(`${this.syncApiUrl}/activities`, { params });
+      
+      // Use the correct endpoint for dividend activities
+      const endpoint = `/activities/dividends/${personName}`;
+      const params = symbol ? { symbol } : {};
+      
+      logger.debug(`[DIVIDEND] Fetching from ${this.syncApiUrl}${endpoint}`);
+      
+      const response = await axios.get(`${this.syncApiUrl}${endpoint}`, { 
+        params,
+        timeout: 10000 // 10 second timeout
+      });
       
       if (response.data && response.data.success) {
-        return response.data.data || [];
+        const activities = response.data.data || [];
+        
+        // Cache the result
+        this.dividendCache.set(cacheKey, {
+          data: activities,
+          timestamp: Date.now()
+        });
+        
+        return activities;
       }
       
       return [];
     } catch (error) {
-      logger.error(`[DIVIDEND] Failed to fetch dividend activities for ${personName}:`, error.message);
+      // Log error but don't throw - return empty array to continue
+      logger.error(`[DIVIDEND] Failed to fetch dividend activities for ${personName}:`, {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      // Return cached data if available, even if expired
+      const cacheKey = `${personName}_${symbol || 'all'}`;
+      const cached = this.dividendCache.get(cacheKey);
+      if (cached) {
+        logger.info(`[DIVIDEND] Returning expired cache for ${cacheKey} due to fetch error`);
+        return cached.data;
+      }
+      
       return [];
     }
   }
@@ -41,15 +73,34 @@ class DividendService {
    */
   async calculateDividendData(symbol, positions, currentPrice) {
     try {
-      // Collect all person names from positions
-      const personNames = [...new Set(positions.map(p => p.personName))];
+      // Return empty dividend data if no positions
+      if (!positions || positions.length === 0) {
+        return this.getEmptyDividendData();
+      }
       
-      // Fetch dividend activities for all persons
+      // Collect all person names from positions
+      const personNames = [...new Set(positions.map(p => p.personName).filter(Boolean))];
+      
+      if (personNames.length === 0) {
+        return this.getEmptyDividendData();
+      }
+      
+      // Fetch dividend activities for all persons (with error handling)
       const allDividendActivities = [];
       
       for (const personName of personNames) {
-        const activities = await this.fetchDividendActivities(personName, symbol);
-        allDividendActivities.push(...activities);
+        try {
+          const activities = await this.fetchDividendActivities(personName, symbol);
+          allDividendActivities.push(...activities);
+        } catch (error) {
+          // Individual fetch failed, continue with others
+          logger.debug(`[DIVIDEND] Skipping ${personName} due to fetch error`);
+        }
+      }
+
+      // If no dividend data available, return empty structure
+      if (allDividendActivities.length === 0) {
+        return this.getEmptyDividendData();
       }
 
       // Calculate total dividends received
@@ -58,16 +109,16 @@ class DividendService {
       }, 0);
 
       // Calculate total shares across all positions
-      const totalShares = positions.reduce((sum, pos) => sum + pos.openQuantity, 0);
+      const totalShares = positions.reduce((sum, pos) => sum + (pos.openQuantity || 0), 0);
       
       // Calculate weighted average cost
       let totalCost = 0;
       positions.forEach(pos => {
-        totalCost += pos.totalCost || (pos.openQuantity * pos.averageEntryPrice);
+        totalCost += pos.totalCost || (pos.openQuantity * pos.averageEntryPrice) || 0;
       });
       const avgCostPerShare = totalShares > 0 ? totalCost / totalShares : 0;
 
-      // Group dividends by year and month
+      // Group dividends by period
       const dividendsByPeriod = this.groupDividendsByPeriod(allDividendActivities);
       
       // Calculate annual dividend (last 12 months)
@@ -94,19 +145,24 @@ class DividendService {
         dividendHistory
       };
     } catch (error) {
-      logger.error(`[DIVIDEND] Failed to calculate dividend data for ${symbol}:`, error);
-      
-      // Return empty dividend data on error
-      return {
-        totalReceived: 0,
-        monthlyDividendPerShare: 0,
-        annualDividend: 0,
-        annualDividendPerShare: 0,
-        yieldOnCost: 0,
-        currentYield: 0,
-        dividendHistory: []
-      };
+      logger.error(`[DIVIDEND] Failed to calculate dividend data for ${symbol}:`, error.message);
+      return this.getEmptyDividendData();
     }
+  }
+
+  /**
+   * Get empty dividend data structure
+   */
+  getEmptyDividendData() {
+    return {
+      totalReceived: 0,
+      monthlyDividendPerShare: 0,
+      annualDividend: 0,
+      annualDividendPerShare: 0,
+      yieldOnCost: 0,
+      currentYield: 0,
+      dividendHistory: []
+    };
   }
 
   /**
@@ -164,6 +220,14 @@ class DividendService {
       date: moment(activity.transactionDate).format('YYYY-MM-DD'),
       amount: Math.round(Math.abs(activity.netAmount || activity.grossAmount || 0) * 100) / 100
     }));
+  }
+
+  /**
+   * Clear dividend cache (for manual refresh)
+   */
+  clearCache() {
+    this.dividendCache.clear();
+    logger.info('[DIVIDEND] Cache cleared');
   }
 
   /**

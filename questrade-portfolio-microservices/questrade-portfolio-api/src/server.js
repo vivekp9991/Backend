@@ -18,6 +18,7 @@ const allocationRoutes = require('./routes/allocation');
 const analyticsRoutes = require('./routes/analytics');
 const reportsRoutes = require('./routes/reports');
 const comparisonRoutes = require('./routes/comparison');
+const dailyPriceSync = require('../../questrade-sync-api/src/jobs/dailyPriceSync');
 
 const app = express();
 
@@ -161,6 +162,11 @@ async function startServer() {
     // Start currency service scheduled updates - ADD THIS
     currencyService.startScheduledUpdates();
     logger.info('Currency service initialized with scheduled updates');
+
+    // Then add this after the currency service initialization (around line 175)
+// Start daily price sync
+dailyPriceSync.scheduleDailySync();
+logger.info('Daily price sync scheduled for 5:00 PM ET on weekdays');
     
     // Start server
     const PORT = config.server.port;

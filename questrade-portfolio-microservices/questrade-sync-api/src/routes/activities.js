@@ -65,6 +65,30 @@ router.get('/person/:personName', asyncHandler(async (req, res) => {
   });
 }));
 
+// Get dividend activities for a person and symbol
+router.get('/dividends/:personName', asyncHandler(async (req, res) => {
+  const { personName } = req.params;
+  const { symbol, limit = 100 } = req.query;
+  
+  const filter = {
+    personName,
+    type: 'Dividend'
+  };
+  
+  if (symbol) {
+    filter.symbol = symbol;
+  }
+  
+  const activities = await Activity.find(filter)
+    .sort({ transactionDate: -1 })
+    .limit(parseInt(limit));
+  
+  res.json({
+    success: true,
+    data: activities
+  });
+}));
+
 // Get activity summary
 router.get('/summary/:personName', asyncHandler(async (req, res) => {
   const { personName } = req.params;
