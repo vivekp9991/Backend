@@ -70,6 +70,8 @@ router.get('/dividends/:personName', asyncHandler(async (req, res) => {
   const { personName } = req.params;
   const { symbol, limit = 100 } = req.query;
   
+  logger.info(`[ACTIVITIES] Getting dividend activities for ${personName}, symbol: ${symbol || 'all'}`);
+  
   const filter = {
     personName,
     type: 'Dividend'
@@ -82,6 +84,18 @@ router.get('/dividends/:personName', asyncHandler(async (req, res) => {
   const activities = await Activity.find(filter)
     .sort({ transactionDate: -1 })
     .limit(parseInt(limit));
+  
+  logger.info(`[ACTIVITIES] Found ${activities.length} dividend activities for ${personName}${symbol ? ` (${symbol})` : ''}`);
+  
+  // Log sample activity for debugging
+  if (activities.length > 0) {
+    logger.debug(`[ACTIVITIES] Sample dividend activity:`, {
+      symbol: activities[0].symbol,
+      date: activities[0].transactionDate,
+      amount: activities[0].netAmount,
+      type: activities[0].type
+    });
+  }
   
   res.json({
     success: true,

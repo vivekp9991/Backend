@@ -139,6 +139,8 @@ async aggregatePositions(positions, accountsMap) {
         return [];
       }
       
+      logger.info(`[PORTFOLIO] Starting aggregation of ${positions.length} positions`);
+      
       // Group positions by symbol
       const symbolGroups = new Map();
 
@@ -169,6 +171,8 @@ async aggregatePositions(positions, accountsMap) {
         }
       }
 
+      logger.info(`[PORTFOLIO] Grouped into ${symbolGroups.size} unique symbols`);
+
       // Get all unique symbols for batch price fetch
       const symbols = Array.from(symbolGroups.keys());
       
@@ -176,7 +180,9 @@ async aggregatePositions(positions, accountsMap) {
       let priceData = {};
       if (symbols.length > 0) {
         try {
+          logger.info(`[PORTFOLIO] Fetching prices for ${symbols.length} symbols`);
           priceData = await marketDataService.getMultiplePrices(symbols);
+          logger.info(`[PORTFOLIO] Fetched prices for ${Object.keys(priceData).length} symbols`);
         } catch (error) {
           logger.error('[PORTFOLIO] Failed to fetch market prices, continuing with cached/default prices:', error.message);
           // Continue with empty price data rather than failing
@@ -187,6 +193,8 @@ async aggregatePositions(positions, accountsMap) {
       const aggregatedPositions = [];
 
       for (const [symbol, group] of symbolGroups.entries()) {
+        logger.debug(`[PORTFOLIO] Processing symbol ${symbol} with ${group.positions.length} positions`);
+        
         const totalQuantity = group.totalQuantity.toNumber();
         const totalCost = group.totalCost.toNumber();
         const averageEntryPrice = totalQuantity > 0 ? totalCost / totalQuantity : 0;
@@ -199,6 +207,8 @@ async aggregatePositions(positions, accountsMap) {
         // Determine currency (assume USD for now, could be enhanced)
         const currency = symbol.includes('.TO') ? 'CAD' : 'USD';
 
+        logger.debug(`[PORTFOLIO] Calculating dividend data for ${symbol}`);
+        
         // Calculate dividend data - wrap in try-catch to prevent failures
         let dividendData = {
           totalReceived: 0,
@@ -211,13 +221,21 @@ async aggregatePositions(positions, accountsMap) {
         };
         
         try {
+          logger.info(`[PORTFOLIO] Starting dividend calculation for ${symbol} with ${group.positions.length} positions`);
           dividendData = await dividendService.calculateDividendData(
             symbol,
             group.positions,
             currentPrice
           );
+          logger.info(`[PORTFOLIO] Dividend calculation complete for ${symbol}:`, {
+            totalReceived: dividendData.totalReceived,
+            annualDividend: dividendData.annualDividend
+          });
         } catch (error) {
-          logger.warn(`[PORTFOLIO] Failed to calculate dividend data for ${symbol}:`, error.message);
+          logger.error(`[PORTFOLIO] Failed to calculate dividend data for ${symbol}:`, {
+            message: error.message,
+            stack: error.stack
+          });
         }
 
         // Build individual positions array
@@ -266,7 +284,10 @@ async aggregatePositions(positions, accountsMap) {
 
       return aggregatedPositions;
     } catch (error) {
-      logger.error('[PORTFOLIO] Failed to aggregate positions:', error);
+      logger.error('[PORTFOLIO] Failed to aggregate positions:', {
+        message: error.message,
+        stack: error.stack
+      });
       // Return empty array instead of throwing
       return [];
     }
