@@ -102,6 +102,119 @@ class SymbolService {
     }
   }
 
+  /**
+   * Get symbol details by symbol name (not ID)
+   * This method fetches symbol details using the symbol ticker rather than symbolId
+   */
+  async getSymbolDetailsBySymbol(symbol, forceRefresh = false) {
+    try {
+      // Check local database first
+      let symbolData = await Symbol.findOne({ symbol: symbol.toUpperCase() });
+      
+      // If we have the data and it's recent (within last hour), return it
+      if (symbolData && !forceRefresh) {
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        if (symbolData.lastDetailUpdate && symbolData.lastDetailUpdate > oneHourAgo) {
+          return symbolData;
+        }
+      }
+      
+      // If not found or needs refresh, search in Questrade
+      const person = await this.getAvailablePerson();
+      
+      const response = await axios.get(
+        `${this.authApiUrl}/auth/access-token/${person}`
+      );
+      
+      const tokenData = response.data.data;
+      
+      // Search for the symbol to get its ID
+      const searchResponse = await axios.get(
+        `${tokenData.apiServer}/v1/symbols/search?prefix=${symbol}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      const symbols = searchResponse.data.symbols || [];
+      const exactMatch = symbols.find(s => s.symbol === symbol.toUpperCase());
+      
+      if (!exactMatch) {
+        logger.warn(`Symbol ${symbol} not found in Questrade`);
+        return symbolData; // Return existing data if available
+      }
+      
+      // Now fetch detailed information using the symbol ID
+      const symbolDetailsResponse = await axios.get(
+        `${tokenData.apiServer}/v1/symbols/${exactMatch.symbolId}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${tokenData.accessToken}`
+          }
+        }
+      );
+      
+      const detailedSymbolData = symbolDetailsResponse.data.symbols?.[0];
+      
+      if (detailedSymbolData) {
+        // Create or update the symbol with all available fields
+        const updatedSymbolData = {
+          symbol: detailedSymbolData.symbol,
+          symbolId: detailedSymbolData.symbolId,
+          description: detailedSymbolData.description || exactMatch.description,
+          securityType: detailedSymbolData.securityType,
+          exchange: detailedSymbolData.exchange,
+          listingExchange: detailedSymbolData.listingExchange,
+          isTradable: detailedSymbolData.isTradable,
+          isQuotable: detailedSymbolData.isQuotable,
+          hasOptions: detailedSymbolData.hasOptions,
+          currency: detailedSymbolData.currency,
+          // Market data fields
+          prevDayClosePrice: detailedSymbolData.prevDayClosePrice || 0,
+          highPrice52: detailedSymbolData.highPrice52 || 0,
+          lowPrice52: detailedSymbolData.lowPrice52 || 0,
+          averageVol3Months: detailedSymbolData.averageVol3Months || 0,
+          averageVol20Days: detailedSymbolData.averageVol20Days || 0,
+          outstandingShares: detailedSymbolData.outstandingShares || 0,
+          eps: detailedSymbolData.eps || 0,
+          pe: detailedSymbolData.pe || 0,
+          dividend: detailedSymbolData.dividend || 0,
+          yield: detailedSymbolData.yield || 0,
+          exDate: detailedSymbolData.exDate,
+          dividendDate: detailedSymbolData.dividendDate,
+          marketCap: detailedSymbolData.marketCap || 0,
+          tradeUnit: detailedSymbolData.tradeUnit || 1,
+          // Additional fields
+          sector: detailedSymbolData.industrySector,
+          industry: detailedSymbolData.industryGroup,
+          industrySubGroup: detailedSymbolData.industrySubgroup,
+          // Update timestamps
+          lastDetailUpdate: new Date(),
+          lastUpdated: new Date()
+        };
+        
+        // Save to database
+        symbolData = await Symbol.findOneAndUpdate(
+          { symbol: symbol.toUpperCase() },
+          updatedSymbolData,
+          { upsert: true, new: true }
+        );
+        
+        logger.info(`Updated symbol details for ${symbol}`);
+      }
+      
+      return symbolData;
+    } catch (error) {
+      logger.error(`Error getting symbol details for ${symbol}:`, error);
+      
+      // Return existing data if available
+      const existingData = await Symbol.findOne({ symbol: symbol.toUpperCase() });
+      return existingData;
+    }
+  }
+
   async fetchSymbolFromQuestrade(symbolId) {
     try {
       const person = await this.getAvailablePerson();
