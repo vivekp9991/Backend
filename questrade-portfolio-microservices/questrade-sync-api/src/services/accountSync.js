@@ -15,18 +15,31 @@ class AccountSync {
       
       for (const qAccount of questradeAccounts) {
         try {
+          // Generate a unique accountId if not provided
+          // Some Questrade responses might have 'id' field
+          const accountId = qAccount.id || qAccount.number;
+          
           // Get account balances for summary
-          const balances = await questradeClient.getAccountBalances(personName, qAccount.number);
+          const balances = await questradeClient.getAccountBalances(personName, accountId);
           apiCalls++;
           
-          // Find or create account
-          let account = await Account.findOne({ accountId: qAccount.number });
+          // Find account by accountId OR number to handle existing records
+          let account = await Account.findOne({
+            $or: [
+              { accountId: accountId },
+              { number: qAccount.number }
+            ]
+          });
           
           if (!account) {
             account = new Account({
-              accountId: qAccount.number,
+              accountId: accountId,
+              number: qAccount.number,
               personName
             });
+          } else {
+            // Update accountId if it was using number before
+            account.accountId = accountId;
           }
           
           // Update account information
@@ -43,14 +56,37 @@ class AccountSync {
             const primaryBalance = balances.combinedBalances[0];
             
             account.summary = {
-              totalEquity: primaryBalance.totalEquity,
+              totalEquity: primaryBalance.totalEquity || 0,
               totalEquityCAD: this.convertToCAD(primaryBalance.totalEquity, primaryBalance.currency),
-              cash: primaryBalance.cash,
+              cash: primaryBalance.cash || 0,
               cashCAD: this.convertToCAD(primaryBalance.cash, primaryBalance.currency),
-              marketValue: primaryBalance.marketValue,
+              marketValue: primaryBalance.marketValue || 0,
               marketValueCAD: this.convertToCAD(primaryBalance.marketValue, primaryBalance.currency),
-              buyingPower: primaryBalance.buyingPower,
-              maintenanceExcess: primaryBalance.maintenanceExcess,
+              buyingPower: primaryBalance.buyingPower || 0,
+              maintenanceExcess: primaryBalance.maintenanceExcess || 0,
+              isRealTime: balances.isRealTime || false
+            };
+          } else if (balances && balances.perCurrencyBalances && balances.perCurrencyBalances.length > 0) {
+            // Handle per-currency balances if no combined balances
+            let totalEquityCAD = 0;
+            let totalCashCAD = 0;
+            let totalMarketValueCAD = 0;
+            
+            balances.perCurrencyBalances.forEach(balance => {
+              totalEquityCAD += this.convertToCAD(balance.totalEquity || 0, balance.currency);
+              totalCashCAD += this.convertToCAD(balance.cash || 0, balance.currency);
+              totalMarketValueCAD += this.convertToCAD(balance.marketValue || 0, balance.currency);
+            });
+            
+            account.summary = {
+              totalEquity: totalEquityCAD,
+              totalEquityCAD: totalEquityCAD,
+              cash: totalCashCAD,
+              cashCAD: totalCashCAD,
+              marketValue: totalMarketValueCAD,
+              marketValueCAD: totalMarketValueCAD,
+              buyingPower: 0,
+              maintenanceExcess: 0,
               isRealTime: balances.isRealTime || false
             };
           }
@@ -61,13 +97,19 @@ class AccountSync {
           await account.save();
           syncedAccounts.push(account);
           
-          logger.info(`Synced account ${account.accountId} (${account.type}) for ${personName}`);
+          logger.info(`Synced account ${account.number} (${account.type}) for ${personName}`);
           
         } catch (error) {
           logger.error(`Error syncing account ${qAccount.number}:`, error);
           
           // Try to update error status on existing account
-          const existingAccount = await Account.findOne({ accountId: qAccount.number });
+          const existingAccount = await Account.findOne({ 
+            $or: [
+              { accountId: qAccount.id || qAccount.number },
+              { number: qAccount.number }
+            ]
+          });
+          
           if (existingAccount) {
             if (!existingAccount.syncErrors) {
               existingAccount.syncErrors = [];
@@ -108,8 +150,12 @@ class AccountSync {
   
   async getAccountDetails(accountId) {
     try {
-      const account = await Account.findOne({ accountId })
-        .select('-syncErrors');
+      const account = await Account.findOne({ 
+        $or: [
+          { accountId: accountId },
+          { number: accountId }
+        ]
+      }).select('-syncErrors');
       
       if (!account) {
         throw new Error(`Account ${accountId} not found`);

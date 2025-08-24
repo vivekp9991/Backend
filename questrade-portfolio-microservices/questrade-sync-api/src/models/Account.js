@@ -10,7 +10,9 @@ const accountSchema = new mongoose.Schema({
   },
   number: {
     type: String,
-    required: true
+    required: true,
+    unique: true,  // Added unique constraint for account number
+    index: true
   },
   type: {
     type: String,

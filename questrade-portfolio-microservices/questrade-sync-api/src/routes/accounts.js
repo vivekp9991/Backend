@@ -42,6 +42,13 @@ router.get('/detail/:accountId', asyncHandler(async (req, res) => {
   
   const account = await accountSync.getAccountDetails(accountId);
   
+  if (!account) {
+    return res.status(404).json({
+      success: false,
+      error: 'Account not found'
+    });
+  }
+  
   res.json({
     success: true,
     data: account

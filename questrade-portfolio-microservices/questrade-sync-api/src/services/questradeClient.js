@@ -112,10 +112,11 @@ class QuestradeClient {
     return response.accounts || [];
   }
 
-  async getAccountBalances(personName, accountId) {
-    const response = await this.makeRequest(personName, `accounts/${accountId}/balances`);
-    return response;
-  }
+async getAccountBalances(personName, accountIdOrNumber) {
+  // Questrade API accepts both account ID and account number
+  const response = await this.makeRequest(personName, `accounts/${accountIdOrNumber}/balances`);
+  return response;
+}
 
   async getAccountPositions(personName, accountId) {
     const response = await this.makeRequest(personName, `accounts/${accountId}/positions`);
