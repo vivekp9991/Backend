@@ -1,0 +1,914 @@
+{
+  "info": {
+    "name": "Questrade Portfolio Microservices API",
+    "_postman_id": "questrade-microservices-collection",
+    "description": "Complete collection for Questrade portfolio management microservices",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "auth_url", "value": "http://localhost:4001" },
+    { "key": "sync_url", "value": "http://localhost:4002" },
+    { "key": "portfolio_url", "value": "http://localhost:4003" },
+    { "key": "market_url", "value": "http://localhost:4004" },
+    { "key": "person_name", "value": "John" },
+    { "key": "account_id", "value": "12345678" },
+    { "key": "symbol", "value": "AAPL" },
+    { "key": "watchlist_id", "value": "watchlist_id_here" }
+  ],
+  "item": [
+    {
+      "name": "1. Auth API (Port 4001)",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{auth_url}}/health"
+          }
+        },
+        {
+          "name": "Persons",
+          "item": [
+            {
+              "name": "Create Person with Token",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"personName\": \"{{person_name}}\",\n  \"displayName\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"refreshToken\": \"YOUR_QUESTRADE_REFRESH_TOKEN_HERE\"\n}"
+                },
+                "url": "{{auth_url}}/api/persons"
+              }
+            },
+            {
+              "name": "Get All Persons",
+              "request": {
+                "method": "GET",
+                "url": "{{auth_url}}/api/persons"
+              }
+            },
+            {
+              "name": "Get Person Details",
+              "request": {
+                "method": "GET",
+                "url": "{{auth_url}}/api/persons/{{person_name}}"
+              }
+            },
+            {
+              "name": "Update Person",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"displayName\": \"John Updated\",\n  \"email\": \"john.updated@example.com\"\n}"
+                },
+                "url": "{{auth_url}}/api/persons/{{person_name}}"
+              }
+            },
+            {
+              "name": "Update Person Token",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"NEW_REFRESH_TOKEN_HERE\"\n}"
+                },
+                "url": "{{auth_url}}/api/persons/{{person_name}}/token"
+              }
+            },
+            {
+              "name": "Delete Person (Soft)",
+              "request": {
+                "method": "DELETE",
+                "url": "{{auth_url}}/api/persons/{{person_name}}"
+              }
+            },
+            {
+              "name": "Delete Person (Permanent)",
+              "request": {
+                "method": "DELETE",
+                "url": "{{auth_url}}/api/persons/{{person_name}}?permanent=true"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Authentication",
+          "item": [
+            {
+              "name": "Setup Person Token",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"personName\": \"{{person_name}}\",\n  \"refreshToken\": \"YOUR_REFRESH_TOKEN_HERE\"\n}"
+                },
+                "url": "{{auth_url}}/api/auth/setup-person"
+              }
+            },
+            {
+              "name": "Refresh Access Token",
+              "request": {
+                "method": "POST",
+                "url": "{{auth_url}}/api/auth/refresh-token/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Token Status",
+              "request": {
+                "method": "GET",
+                "url": "{{auth_url}}/api/auth/token-status/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Access Token",
+              "request": {
+                "method": "GET",
+                "url": "{{auth_url}}/api/auth/access-token/{{person_name}}"
+              }
+            },
+            {
+              "name": "Test Connection",
+              "request": {
+                "method": "POST",
+                "url": "{{auth_url}}/api/auth/test-connection/{{person_name}}"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tokens",
+          "item": [
+            {
+              "name": "Get All Tokens",
+              "request": {
+                "method": "GET",
+                "url": "{{auth_url}}/api/tokens"
+              }
+            },
+            {
+              "name": "Get Person Tokens",
+              "request": {
+                "method": "GET",
+                "url": "{{auth_url}}/api/tokens/{{person_name}}"
+              }
+            },
+            {
+              "name": "Delete Expired Tokens",
+              "request": {
+                "method": "DELETE",
+                "url": "{{auth_url}}/api/tokens/expired"
+              }
+            },
+            {
+              "name": "Get Token Statistics",
+              "request": {
+                "method": "GET",
+                "url": "{{auth_url}}/api/tokens/stats/summary"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Sync API (Port 4002)",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{sync_url}}/health"
+          }
+        },
+        {
+          "name": "Sync Operations",
+          "item": [
+            {
+              "name": "Sync All Persons",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"triggeredBy\": \"manual\"\n}"
+                },
+                "url": "{{sync_url}}/api/sync/all"
+              }
+            },
+            {
+              "name": "Sync Specific Person",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"syncType\": \"full\",\n  \"triggeredBy\": \"manual\"\n}"
+                },
+                "url": "{{sync_url}}/api/sync/person/{{person_name}}"
+              }
+            },
+            {
+              "name": "Sync Accounts Only",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"triggeredBy\": \"manual\"\n}"
+                },
+                "url": "{{sync_url}}/api/sync/accounts/{{person_name}}"
+              }
+            },
+            {
+              "name": "Sync Positions Only",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"triggeredBy\": \"manual\"\n}"
+                },
+                "url": "{{sync_url}}/api/sync/positions/{{person_name}}"
+              }
+            },
+            {
+              "name": "Sync Activities Only",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"triggeredBy\": \"manual\"\n}"
+                },
+                "url": "{{sync_url}}/api/sync/activities/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Sync Status",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/sync/status"
+              }
+            },
+            {
+              "name": "Get Sync History",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/sync/history?limit=50"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Accounts",
+          "item": [
+            {
+              "name": "Get All Accounts",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/accounts"
+              }
+            },
+            {
+              "name": "Get Person Accounts",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/accounts/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Account Details",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/accounts/detail/{{account_id}}"
+              }
+            },
+            {
+              "name": "Get Account Summary",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/accounts/summary/{{person_name}}"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Positions",
+          "item": [
+            {
+              "name": "Get All Positions",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/positions"
+              }
+            },
+            {
+              "name": "Get Account Positions",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/positions/{{account_id}}"
+              }
+            },
+            {
+              "name": "Get Person Positions",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/positions/person/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Position Summary",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/positions/summary/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Top Positions",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/positions/top/{{person_name}}?limit=10"
+              }
+            },
+            {
+              "name": "Get P&L Summary",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/positions/pnl/{{person_name}}"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Activities",
+          "item": [
+            {
+              "name": "Get All Activities",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/activities?limit=100"
+              }
+            },
+            {
+              "name": "Get Account Activities",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/activities/{{account_id}}?limit=100"
+              }
+            },
+            {
+              "name": "Get Person Activities",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/activities/person/{{person_name}}?limit=100"
+              }
+            },
+            {
+              "name": "Get Activity Summary",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/activities/summary/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Activity Types",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/activities/types/list"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Statistics",
+          "item": [
+            {
+              "name": "Get Sync Statistics",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/stats/sync"
+              }
+            },
+            {
+              "name": "Get Data Statistics",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/stats/data"
+              }
+            },
+            {
+              "name": "Get Error Statistics",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/stats/errors?days=7"
+              }
+            },
+            {
+              "name": "Get Person Statistics",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/stats/person/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Performance Metrics",
+              "request": {
+                "method": "GET",
+                "url": "{{sync_url}}/api/stats/performance?days=7"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Portfolio API (Port 4003)",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{portfolio_url}}/health"
+          }
+        },
+        {
+          "name": "Portfolio",
+          "item": [
+            {
+              "name": "Get Portfolio Overview",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/portfolio/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Portfolio Summary",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/portfolio/{{person_name}}/summary"
+              }
+            },
+            {
+              "name": "Get All Holdings",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/portfolio/{{person_name}}/holdings?sortBy=value&order=desc"
+              }
+            },
+            {
+              "name": "Get Portfolio Value",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/portfolio/{{person_name}}/value"
+              }
+            },
+            {
+              "name": "Create Portfolio Snapshot",
+              "request": {
+                "method": "POST",
+                "url": "{{portfolio_url}}/api/portfolio/{{person_name}}/snapshot"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Performance",
+          "item": [
+            {
+              "name": "Get Performance Metrics",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/performance/{{person_name}}?period=1Y"
+              }
+            },
+            {
+              "name": "Get Historical Performance",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/performance/{{person_name}}/history?interval=daily"
+              }
+            },
+            {
+              "name": "Get Return Calculations",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/performance/{{person_name}}/returns"
+              }
+            },
+            {
+              "name": "Get Daily Performance",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/performance/{{person_name}}/daily?days=30"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Allocation",
+          "item": [
+            {
+              "name": "Get Asset Allocation",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/allocation/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Sector Allocation",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/allocation/{{person_name}}/sector"
+              }
+            },
+            {
+              "name": "Get Geographic Allocation",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/allocation/{{person_name}}/geographic"
+              }
+            },
+            {
+              "name": "Get Currency Allocation",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/allocation/{{person_name}}/currency"
+              }
+            },
+            {
+              "name": "Get Account Type Allocation",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/allocation/{{person_name}}/account-type"
+              }
+            },
+            {
+              "name": "Get Market Cap Allocation",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/allocation/{{person_name}}/market-cap"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Analytics",
+          "item": [
+            {
+              "name": "Get Risk Metrics",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/analytics/{{person_name}}/risk?period=1Y"
+              }
+            },
+            {
+              "name": "Get Diversification Analysis",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/analytics/{{person_name}}/diversification"
+              }
+            },
+            {
+              "name": "Get Correlation Matrix",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/analytics/{{person_name}}/correlation"
+              }
+            },
+            {
+              "name": "Get Concentration Analysis",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/analytics/{{person_name}}/concentration"
+              }
+            },
+            {
+              "name": "Get Drawdown Analysis",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/analytics/{{person_name}}/drawdown?period=1Y"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reports",
+          "item": [
+            {
+              "name": "Get Summary Report",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/reports/{{person_name}}/summary?format=json&period=1Y"
+              }
+            },
+            {
+              "name": "Get Detailed Report",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/reports/{{person_name}}/detailed?format=json"
+              }
+            },
+            {
+              "name": "Get Tax Report",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/reports/{{person_name}}/tax?year=2024&format=json"
+              }
+            },
+            {
+              "name": "Generate Custom Report",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"sections\": [\"performance\", \"allocation\", \"holdings\"],\n  \"period\": \"1Y\",\n  \"format\": \"json\"\n}"
+                },
+                "url": "{{portfolio_url}}/api/reports/{{person_name}}/custom"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Comparison",
+          "item": [
+            {
+              "name": "Compare Multiple Persons",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/comparison/persons?persons=John,Jane&period=1Y"
+              }
+            },
+            {
+              "name": "Compare to Benchmark",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/comparison/{{person_name}}/benchmark?benchmark=SPY&period=1Y"
+              }
+            },
+            {
+              "name": "Period-over-Period Comparison",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/comparison/{{person_name}}/period?periods=1M,3M,6M,1Y"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Market API (Port 4004)",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{market_url}}/health"
+          }
+        },
+        {
+          "name": "Markets",
+          "item": [
+            {
+              "name": "Get Market Status",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/markets/status"
+              }
+            },
+            {
+              "name": "Get Market Summary",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/markets/summary"
+              }
+            },
+            {
+              "name": "Get Market Movers",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/markets/movers?type=all&limit=10"
+              }
+            },
+            {
+              "name": "Get Sector Performance",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/markets/sectors"
+              }
+            },
+            {
+              "name": "Get Market Breadth",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/markets/breadth"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quotes",
+          "item": [
+            {
+              "name": "Get Single Quote",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/quotes/{{symbol}}"
+              }
+            },
+            {
+              "name": "Get Multiple Quotes",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/quotes?symbols=AAPL,GOOGL,MSFT"
+              }
+            },
+            {
+              "name": "Get Quote Stream",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/quotes/{{symbol}}/stream?interval=5000"
+              }
+            },
+            {
+              "name": "Get Historical Quotes",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/quotes/{{symbol}}/history?days=30"
+              }
+            },
+            {
+              "name": "Refresh Quote",
+              "request": {
+                "method": "POST",
+                "url": "{{market_url}}/api/quotes/{{symbol}}/refresh"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Symbols",
+          "item": [
+            {
+              "name": "Search Symbols",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/symbols/search?prefix=APP&limit=10"
+              }
+            },
+            {
+              "name": "Get Symbol Details",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/symbols/8049"
+              }
+            },
+            {
+              "name": "Get Options Chain",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/symbols/{{symbol}}/options"
+              }
+            },
+            {
+              "name": "Get Symbol Fundamentals",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/symbols/{{symbol}}/fundamentals"
+              }
+            },
+            {
+              "name": "Sync Symbol from Questrade",
+              "request": {
+                "method": "POST",
+                "url": "{{market_url}}/api/symbols/{{symbol}}/sync"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Watchlists",
+          "item": [
+            {
+              "name": "Get User Watchlists",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/watchlists/{{person_name}}"
+              }
+            },
+            {
+              "name": "Get Specific Watchlist",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/watchlists/{{person_name}}/{{watchlist_id}}"
+              }
+            },
+            {
+              "name": "Get Watchlist with Quotes",
+              "request": {
+                "method": "GET",
+                "url": "{{market_url}}/api/watchlists/{{person_name}}/{{watchlist_id}}/quotes"
+              }
+            },
+            {
+              "name": "Create Watchlist",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Tech Stocks\",\n  \"description\": \"Technology companies\",\n  \"symbols\": [\"AAPL\", \"GOOGL\", \"MSFT\", \"NVDA\"]\n}"
+                },
+                "url": "{{market_url}}/api/watchlists/{{person_name}}"
+              }
+            },
+            {
+              "name": "Update Watchlist",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Updated Tech Stocks\",\n  \"description\": \"Updated description\"\n}"
+                },
+                "url": "{{market_url}}/api/watchlists/{{watchlist_id}}"
+              }
+            },
+            {
+              "name": "Add Symbol to Watchlist",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"symbol\": \"TSLA\"\n}"
+                },
+                "url": "{{market_url}}/api/watchlists/{{watchlist_id}}/symbols"
+              }
+            },
+            {
+              "name": "Remove Symbol from Watchlist",
+              "request": {
+                "method": "DELETE",
+                "url": "{{market_url}}/api/watchlists/{{watchlist_id}}/symbols/TSLA"
+              }
+            },
+            {
+              "name": "Delete Watchlist",
+              "request": {
+                "method": "DELETE",
+                "url": "{{market_url}}/api/watchlists/{{watchlist_id}}"
+              }
+            },
+            {
+              "name": "Setup Alert",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"symbol\": \"AAPL\",\n  \"type\": \"above\",\n  \"threshold\": 200\n}"
+                },
+                "url": "{{market_url}}/api/watchlists/{{watchlist_id}}/alerts"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
