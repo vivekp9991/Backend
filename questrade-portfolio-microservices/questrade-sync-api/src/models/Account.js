@@ -11,13 +11,30 @@ const accountSchema = new mongoose.Schema({
   number: {
     type: String,
     required: true,
-    unique: true,  // Added unique constraint for account number
-    index: true
+    index: true  // Removed unique constraint as accountId is the unique identifier
   },
   type: {
     type: String,
     required: true,
-    enum: ['Cash', 'Margin', 'TFSA', 'RRSP', 'RESP', 'LIRA', 'RIF', 'SRIF', 'LIF', 'LRIF', 'PRIF', 'RRIF']
+    enum: [
+      'Cash', 
+      'Margin', 
+      'TFSA', 
+      'RRSP', 
+      'RESP', 
+      'LIRA', 
+      'RIF', 
+      'SRIF', 
+      'LIF', 
+      'LRIF', 
+      'PRIF', 
+      'RRIF',
+      'FHSA',  // First Home Savings Account
+      'LRSP',  // Locked-in RSP
+      'RDSP',  // Registered Disability Savings Plan
+      'DPSP',  // Deferred Profit Sharing Plan
+      'Other'  // Catch-all for any new account types
+    ]
   },
   status: {
     type: String,

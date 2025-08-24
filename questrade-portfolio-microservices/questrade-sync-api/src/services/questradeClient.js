@@ -61,6 +61,8 @@ class QuestradeClient {
       const tokenData = await this.getAccessToken(personName);
       const url = `${tokenData.apiServer}/v1/${endpoint}`;
       
+      logger.info(`[QUESTRADE API] Making ${method} request to: ${url}`);
+      
       try {
         const response = await axios({
           method,
@@ -72,10 +74,17 @@ class QuestradeClient {
           timeout: 15000
         });
         
+        // Log the raw response for debugging
+        logger.info(`[QUESTRADE API] Response from ${endpoint}:`, {
+          status: response.status,
+          dataKeys: Object.keys(response.data),
+          dataPreview: JSON.stringify(response.data).substring(0, 500)
+        });
+        
         return response.data;
       } catch (error) {
         if (error.response) {
-          logger.error(`Questrade API error for ${personName}:`, {
+          logger.error(`[QUESTRADE API] Error for ${personName}:`, {
             endpoint,
             status: error.response.status,
             data: error.response.data
@@ -108,18 +117,58 @@ class QuestradeClient {
 
   // Account endpoints
   async getAccounts(personName) {
+    logger.info(`[QUESTRADE] Getting accounts for ${personName}`);
     const response = await this.makeRequest(personName, 'accounts');
+    
+    // Log the full account response structure
+    logger.info(`[QUESTRADE] Raw accounts response:`, {
+      hasAccounts: !!response.accounts,
+      accountCount: response.accounts?.length || 0,
+      fullResponse: JSON.stringify(response, null, 2)
+    });
+    
+    // Log each account's structure
+    if (response.accounts && response.accounts.length > 0) {
+      response.accounts.forEach((account, index) => {
+        logger.info(`[QUESTRADE] Account ${index + 1} structure:`, {
+          keys: Object.keys(account),
+          data: JSON.stringify(account, null, 2)
+        });
+      });
+    }
+    
     return response.accounts || [];
   }
 
-async getAccountBalances(personName, accountIdOrNumber) {
-  // Questrade API accepts both account ID and account number
-  const response = await this.makeRequest(personName, `accounts/${accountIdOrNumber}/balances`);
-  return response;
-}
+  async getAccountBalances(personName, accountIdOrNumber) {
+    logger.info(`[QUESTRADE] Getting balances for account ${accountIdOrNumber}`);
+    // Questrade API accepts both account ID and account number
+    const response = await this.makeRequest(personName, `accounts/${accountIdOrNumber}/balances`);
+    
+    logger.info(`[QUESTRADE] Raw balances response for account ${accountIdOrNumber}:`, {
+      hasCombinedBalances: !!response.combinedBalances,
+      hasPerCurrencyBalances: !!response.perCurrencyBalances,
+      combinedCount: response.combinedBalances?.length || 0,
+      perCurrencyCount: response.perCurrencyBalances?.length || 0,
+      fullResponse: JSON.stringify(response, null, 2)
+    });
+    
+    return response;
+  }
 
   async getAccountPositions(personName, accountId) {
+    logger.info(`[QUESTRADE] Getting positions for account ${accountId}`);
     const response = await this.makeRequest(personName, `accounts/${accountId}/positions`);
+    
+    logger.info(`[QUESTRADE] Positions response for account ${accountId}:`, {
+      positionCount: response.positions?.length || 0,
+      positions: response.positions?.map(p => ({
+        symbol: p.symbol,
+        quantity: p.openQuantity,
+        marketValue: p.currentMarketValue
+      }))
+    });
+    
     return response.positions || [];
   }
 
@@ -129,7 +178,14 @@ async getAccountBalances(personName, accountIdOrNumber) {
     if (endDate) params.append('endTime', endDate.toISOString());
     
     const endpoint = `accounts/${accountId}/activities?${params.toString()}`;
+    logger.info(`[QUESTRADE] Getting activities for account ${accountId}`);
+    
     const response = await this.makeRequest(personName, endpoint);
+    
+    logger.info(`[QUESTRADE] Activities response for account ${accountId}:`, {
+      activityCount: response.activities?.length || 0
+    });
+    
     return response.activities || [];
   }
 
