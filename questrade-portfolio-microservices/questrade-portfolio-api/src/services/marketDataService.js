@@ -61,16 +61,29 @@ class MarketDataService {
     }
   }
 
-  /**
+/**
    * Get prices for multiple symbols
    */
   async getMultiplePrices(symbols) {
     try {
+      // Handle empty symbols array
+      if (!symbols || symbols.length === 0) {
+        logger.debug('[MARKET DATA] No symbols provided for price fetch');
+        return {};
+      }
+      
       const uniqueSymbols = [...new Set(symbols)];
       const prices = {};
 
       // Try to fetch all at once from Market API
       const symbolsParam = uniqueSymbols.join(',');
+      
+      // Ensure we have symbols before making the request
+      if (!symbolsParam || symbolsParam === '') {
+        logger.warn('[MARKET DATA] Empty symbols parameter, skipping price fetch');
+        return prices;
+      }
+      
       const response = await axios.get(`${this.marketApiUrl}/quotes`, {
         params: { symbols: symbolsParam }
       });
@@ -100,9 +113,13 @@ class MarketDataService {
       // For any missing symbols, try individual fetches
       for (const symbol of uniqueSymbols) {
         if (!prices[symbol]) {
-          const price = await this.getCurrentPrice(symbol);
-          if (price) {
-            prices[symbol] = price;
+          try {
+            const price = await this.getCurrentPrice(symbol);
+            if (price) {
+              prices[symbol] = price;
+            }
+          } catch (error) {
+            logger.debug(`[MARKET DATA] Could not fetch price for ${symbol}: ${error.message}`);
           }
         }
       }
@@ -111,12 +128,18 @@ class MarketDataService {
     } catch (error) {
       logger.error('[MARKET DATA] Failed to fetch multiple prices:', error.message);
       
-      // Try to get individually
+      // Try to get individually as fallback
       const prices = {};
-      for (const symbol of symbols) {
-        const price = await this.getCurrentPrice(symbol);
-        if (price) {
-          prices[symbol] = price;
+      if (symbols && symbols.length > 0) {
+        for (const symbol of symbols) {
+          try {
+            const price = await this.getCurrentPrice(symbol);
+            if (price) {
+              prices[symbol] = price;
+            }
+          } catch (error) {
+            logger.debug(`[MARKET DATA] Could not fetch individual price for ${symbol}: ${error.message}`);
+          }
         }
       }
       

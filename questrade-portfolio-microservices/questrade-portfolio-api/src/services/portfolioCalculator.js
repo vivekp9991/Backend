@@ -12,16 +12,39 @@ class PortfolioCalculator {
     this.syncApiUrl = config.services.syncApiUrl;
   }
 
-  /**
+/**
    * Fetch data from Sync API
    */
   async fetchFromSyncApi(endpoint, params = {}) {
     try {
       const response = await axios.get(`${this.syncApiUrl}${endpoint}`, { params });
+      
+      // Check if response has expected structure
+      if (!response.data) {
+        logger.warn(`[PORTFOLIO] No data in response from ${endpoint}`);
+        return { success: false, data: [] };
+      }
+      
       return response.data;
     } catch (error) {
-      logger.error(`Error fetching from Sync API ${endpoint}:`, error.message);
-      throw new Error(`Failed to fetch data from Sync API: ${error.message}`);
+      // Log more detailed error information
+      if (error.response) {
+        logger.error(`[PORTFOLIO] Sync API error ${endpoint}:`, {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data
+        });
+      } else if (error.request) {
+        logger.error(`[PORTFOLIO] No response from Sync API ${endpoint}:`, {
+          message: error.message,
+          syncApiUrl: this.syncApiUrl
+        });
+      } else {
+        logger.error(`[PORTFOLIO] Error setting up request to Sync API ${endpoint}:`, error.message);
+      }
+      
+      // Return empty but valid response structure
+      return { success: false, data: [] };
     }
   }
 
@@ -108,11 +131,14 @@ class PortfolioCalculator {
     }
   }
 
-  /**
-   * Aggregate positions by symbol across all accounts
-   */
-  async aggregatePositions(positions, accountsMap) {
+async aggregatePositions(positions, accountsMap) {
     try {
+      // If no positions, return empty array
+      if (!positions || positions.length === 0) {
+        logger.info('[PORTFOLIO] No positions to aggregate');
+        return [];
+      }
+      
       // Group positions by symbol
       const symbolGroups = new Map();
 
@@ -145,7 +171,17 @@ class PortfolioCalculator {
 
       // Get all unique symbols for batch price fetch
       const symbols = Array.from(symbolGroups.keys());
-      const priceData = await marketDataService.getMultiplePrices(symbols);
+      
+      // Only fetch prices if we have symbols
+      let priceData = {};
+      if (symbols.length > 0) {
+        try {
+          priceData = await marketDataService.getMultiplePrices(symbols);
+        } catch (error) {
+          logger.error('[PORTFOLIO] Failed to fetch market prices, continuing with cached/default prices:', error.message);
+          // Continue with empty price data rather than failing
+        }
+      }
 
       // Build aggregated positions
       const aggregatedPositions = [];
@@ -163,12 +199,26 @@ class PortfolioCalculator {
         // Determine currency (assume USD for now, could be enhanced)
         const currency = symbol.includes('.TO') ? 'CAD' : 'USD';
 
-        // Calculate dividend data
-        const dividendData = await dividendService.calculateDividendData(
-          symbol,
-          group.positions,
-          currentPrice
-        );
+        // Calculate dividend data - wrap in try-catch to prevent failures
+        let dividendData = {
+          totalReceived: 0,
+          monthlyDividendPerShare: 0,
+          annualDividend: 0,
+          annualDividendPerShare: 0,
+          yieldOnCost: 0,
+          currentYield: 0,
+          dividendHistory: []
+        };
+        
+        try {
+          dividendData = await dividendService.calculateDividendData(
+            symbol,
+            group.positions,
+            currentPrice
+          );
+        } catch (error) {
+          logger.warn(`[PORTFOLIO] Failed to calculate dividend data for ${symbol}:`, error.message);
+        }
 
         // Build individual positions array
         const individualPositions = [];
@@ -217,7 +267,8 @@ class PortfolioCalculator {
       return aggregatedPositions;
     } catch (error) {
       logger.error('[PORTFOLIO] Failed to aggregate positions:', error);
-      throw error;
+      // Return empty array instead of throwing
+      return [];
     }
   }
 

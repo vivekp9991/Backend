@@ -24,10 +24,46 @@ router.get('/:symbol', validateSymbol, cache.middleware, asyncHandler(async (req
 }));
 
 // Get multiple quotes
-router.get('/', validateSymbols, cache.middleware, asyncHandler(async (req, res) => {
-  const { symbols } = req;
+router.get('/', asyncHandler(async (req, res) => {
+  const { symbols } = req.query;
   
-  const quotes = await quoteService.getMultipleQuotes(symbols);
+  // Handle empty or missing symbols parameter
+  if (!symbols || symbols === '') {
+    return res.status(400).json({
+      success: false,
+      error: 'Symbols parameter is required and cannot be empty',
+      code: 'MISSING_SYMBOLS'
+    });
+  }
+  
+  // Parse symbols
+  const symbolList = Array.isArray(symbols) 
+    ? symbols 
+    : symbols.split(',').map(s => s.trim()).filter(s => s !== '');
+  
+  // Check if we have valid symbols after parsing
+  if (symbolList.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'At least one valid symbol is required',
+      code: 'EMPTY_SYMBOLS'
+    });
+  }
+  
+  // Validate symbol count
+  if (symbolList.length > 100) {
+    return res.status(400).json({
+      success: false,
+      error: 'Maximum 100 symbols allowed',
+      code: 'TOO_MANY_SYMBOLS'
+    });
+  }
+  
+  // Process symbols
+  const validSymbols = symbolList.map(s => s.toUpperCase());
+  
+  // Fetch quotes
+  const quotes = await quoteService.getMultipleQuotes(validSymbols);
   
   res.json({
     success: true,
