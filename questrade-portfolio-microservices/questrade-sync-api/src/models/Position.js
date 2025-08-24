@@ -14,6 +14,12 @@ const positionSchema = new mongoose.Schema({
     index: true
   },
   
+  // Account type (TFSA, RRSP, FHSA, etc.)
+  accountType: {
+    type: String,
+    index: true
+  },
+  
   // Security information
   symbol: {
     type: String,
@@ -124,7 +130,7 @@ positionSchema.virtual('openPnlPercent').get(function() {
 });
 
 // Method to update from Questrade data
-positionSchema.methods.updateFromQuestrade = function(questradeData) {
+positionSchema.methods.updateFromQuestrade = function(questradeData, accountType = null) {
   Object.assign(this, {
     openQuantity: questradeData.openQuantity,
     closedQuantity: questradeData.closedQuantity || 0,
@@ -141,6 +147,10 @@ positionSchema.methods.updateFromQuestrade = function(questradeData) {
     lastPriceUpdate: new Date()
   });
   
+  if (accountType) {
+    this.accountType = accountType;
+  }
+  
   return this.save();
 };
 
@@ -154,6 +164,169 @@ positionSchema.statics.getByAccount = function(accountId) {
 positionSchema.statics.getByPerson = function(personName) {
   return this.find({ personName })
     .sort({ currentMarketValue: -1 });
+};
+
+// Static method to get aggregated positions across all persons
+positionSchema.statics.getAggregatedPositions = async function(filter = {}) {
+  const positions = await this.find(filter);
+  
+  // Group positions by symbol
+  const aggregatedMap = new Map();
+  
+  positions.forEach(position => {
+    if (!aggregatedMap.has(position.symbol)) {
+      aggregatedMap.set(position.symbol, {
+        symbol: position.symbol,
+        symbolId: position.symbolId,
+        persons: new Set(),
+        accounts: [],
+        totalQuantity: new Decimal(0),
+        totalCost: new Decimal(0),
+        totalMarketValue: new Decimal(0),
+        totalOpenPnl: new Decimal(0),
+        totalClosedPnl: new Decimal(0),
+        totalDayPnl: new Decimal(0),
+        currentPrice: 0,
+        isRealTime: false
+      });
+    }
+    
+    const agg = aggregatedMap.get(position.symbol);
+    agg.persons.add(position.personName);
+    agg.accounts.push({
+      accountId: position.accountId,
+      accountType: position.accountType || 'Unknown',
+      quantity: position.openQuantity,
+      averagePrice: position.averageEntryPrice,
+      cost: position.totalCost,
+      marketValue: position.currentMarketValue,
+      openPnl: position.openPnl
+    });
+    
+    agg.totalQuantity = agg.totalQuantity.plus(position.openQuantity || 0);
+    agg.totalCost = agg.totalCost.plus(position.totalCost || 0);
+    agg.totalMarketValue = agg.totalMarketValue.plus(position.currentMarketValue || 0);
+    agg.totalOpenPnl = agg.totalOpenPnl.plus(position.openPnl || 0);
+    agg.totalClosedPnl = agg.totalClosedPnl.plus(position.closedPnl || 0);
+    agg.totalDayPnl = agg.totalDayPnl.plus(position.dayPnl || 0);
+    
+    // Use the most recent price
+    if (position.currentPrice) {
+      agg.currentPrice = position.currentPrice;
+    }
+    
+    // Mark as real-time if any position is real-time
+    if (position.isRealTime) {
+      agg.isRealTime = true;
+    }
+  });
+  
+  // Convert to array and calculate weighted average price
+  const aggregatedPositions = [];
+  
+  aggregatedMap.forEach((agg, symbol) => {
+    const totalQuantity = agg.totalQuantity.toNumber();
+    const totalCost = agg.totalCost.toNumber();
+    
+    aggregatedPositions.push({
+      symbol: symbol,
+      symbolId: agg.symbolId,
+      personName: Array.from(agg.persons).join(', '),
+      openQuantity: totalQuantity,
+      averageEntryPrice: totalQuantity > 0 ? totalCost / totalQuantity : 0,
+      currentMarketValue: agg.totalMarketValue.toNumber(),
+      totalCost: totalCost,
+      currentPrice: agg.currentPrice,
+      openPnl: agg.totalOpenPnl.toNumber(),
+      closedPnl: agg.totalClosedPnl.toNumber(),
+      dayPnl: agg.totalDayPnl.toNumber(),
+      accounts: agg.accounts,
+      isRealTime: agg.isRealTime
+    });
+  });
+  
+  return aggregatedPositions.sort((a, b) => b.currentMarketValue - a.currentMarketValue);
+};
+
+// Static method to get aggregated positions for a specific person
+positionSchema.statics.getAggregatedByPerson = async function(personName) {
+  const positions = await this.find({ personName });
+  
+  // Group positions by symbol
+  const aggregatedMap = new Map();
+  
+  positions.forEach(position => {
+    if (!aggregatedMap.has(position.symbol)) {
+      aggregatedMap.set(position.symbol, {
+        symbol: position.symbol,
+        symbolId: position.symbolId,
+        personName: personName,
+        accounts: [],
+        totalQuantity: new Decimal(0),
+        totalCost: new Decimal(0),
+        totalMarketValue: new Decimal(0),
+        totalOpenPnl: new Decimal(0),
+        totalClosedPnl: new Decimal(0),
+        totalDayPnl: new Decimal(0),
+        currentPrice: 0,
+        isRealTime: false
+      });
+    }
+    
+    const agg = aggregatedMap.get(position.symbol);
+    agg.accounts.push({
+      accountId: position.accountId,
+      accountType: position.accountType || 'Unknown',
+      quantity: position.openQuantity,
+      averagePrice: position.averageEntryPrice,
+      cost: position.totalCost,
+      marketValue: position.currentMarketValue,
+      openPnl: position.openPnl
+    });
+    
+    agg.totalQuantity = agg.totalQuantity.plus(position.openQuantity || 0);
+    agg.totalCost = agg.totalCost.plus(position.totalCost || 0);
+    agg.totalMarketValue = agg.totalMarketValue.plus(position.currentMarketValue || 0);
+    agg.totalOpenPnl = agg.totalOpenPnl.plus(position.openPnl || 0);
+    agg.totalClosedPnl = agg.totalClosedPnl.plus(position.closedPnl || 0);
+    agg.totalDayPnl = agg.totalDayPnl.plus(position.dayPnl || 0);
+    
+    // Use the most recent price
+    if (position.currentPrice) {
+      agg.currentPrice = position.currentPrice;
+    }
+    
+    // Mark as real-time if any position is real-time
+    if (position.isRealTime) {
+      agg.isRealTime = true;
+    }
+  });
+  
+  // Convert to array and calculate weighted average price
+  const aggregatedPositions = [];
+  
+  aggregatedMap.forEach((agg, symbol) => {
+    const totalQuantity = agg.totalQuantity.toNumber();
+    const totalCost = agg.totalCost.toNumber();
+    
+    aggregatedPositions.push({
+      symbol: symbol,
+      symbolId: agg.symbolId,
+      personName: personName,
+      openQuantity: totalQuantity,
+      averageEntryPrice: totalQuantity > 0 ? totalCost / totalQuantity : 0,
+      currentMarketValue: agg.totalMarketValue.toNumber(),
+      totalCost: totalCost,
+      currentPrice: agg.currentPrice,
+      openPnl: agg.totalOpenPnl.toNumber(),
+      closedPnl: agg.totalClosedPnl.toNumber(),
+      dayPnl: agg.totalDayPnl.toNumber(),
+      accounts: agg.accounts,
+      isRealTime: agg.isRealTime
+    });
+  });
+  
+  return aggregatedPositions.sort((a, b) => b.currentMarketValue - a.currentMarketValue);
 };
 
 // Static method to calculate portfolio summary

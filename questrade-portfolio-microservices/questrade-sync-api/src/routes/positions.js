@@ -5,25 +5,38 @@ const positionSync = require('../services/positionSync');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
-// Get all positions
+// Get all positions (aggregated across all accounts and persons)
 router.get('/', asyncHandler(async (req, res) => {
-  const { personName, symbol, accountId } = req.query;
+  const { personName, symbol, accountId, aggregated = 'true' } = req.query;
   
   const filter = {};
   if (personName) filter.personName = personName;
   if (symbol) filter.symbol = symbol;
   if (accountId) filter.accountId = accountId;
   
-  const positions = await Position.find(filter)
-    .sort({ currentMarketValue: -1 });
-  
-  res.json({
-    success: true,
-    data: positions
-  });
+  // By default, aggregate positions across accounts
+  if (aggregated === 'true' && !accountId) {
+    const positions = await Position.getAggregatedPositions(filter);
+    
+    res.json({
+      success: true,
+      aggregated: true,
+      data: positions
+    });
+  } else {
+    // Return raw positions without aggregation
+    const positions = await Position.find(filter)
+      .sort({ currentMarketValue: -1 });
+    
+    res.json({
+      success: true,
+      aggregated: false,
+      data: positions
+    });
+  }
 }));
 
-// Get positions for a specific account
+// Get positions for a specific account (no aggregation)
 router.get('/:accountId', asyncHandler(async (req, res) => {
   const { accountId } = req.params;
   
@@ -31,20 +44,37 @@ router.get('/:accountId', asyncHandler(async (req, res) => {
   
   res.json({
     success: true,
+    aggregated: false,
     data: positions
   });
 }));
 
-// Get positions for a person
+// Get positions for a person (aggregated across their accounts)
 router.get('/person/:personName', asyncHandler(async (req, res) => {
   const { personName } = req.params;
+  const { aggregated = 'true' } = req.query;
   
-  const positions = await positionSync.getPersonPositions(personName);
-  
-  res.json({
-    success: true,
-    data: positions
-  });
+  if (aggregated === 'true') {
+    // Get aggregated positions for this person
+    const positions = await Position.getAggregatedByPerson(personName);
+    
+    res.json({
+      success: true,
+      aggregated: true,
+      personName: personName,
+      data: positions
+    });
+  } else {
+    // Get raw positions without aggregation
+    const positions = await positionSync.getPersonPositions(personName);
+    
+    res.json({
+      success: true,
+      aggregated: false,
+      personName: personName,
+      data: positions
+    });
+  }
 }));
 
 // Get portfolio summary
@@ -59,7 +89,7 @@ router.get('/summary/:personName', asyncHandler(async (req, res) => {
   });
 }));
 
-// Get position details
+// Get position details (raw position for specific account/symbol)
 router.get('/detail/:accountId/:symbol', asyncHandler(async (req, res) => {
   const { accountId, symbol } = req.params;
   
@@ -78,26 +108,32 @@ router.get('/detail/:accountId/:symbol', asyncHandler(async (req, res) => {
   });
 }));
 
-// Get top positions by value
+// Get top positions by value (aggregated)
 router.get('/top/:personName', asyncHandler(async (req, res) => {
   const { personName } = req.params;
   const { limit = 10 } = req.query;
   
-  const positions = await Position.find({ personName })
-    .sort({ currentMarketValue: -1 })
-    .limit(parseInt(limit));
+  // Get aggregated positions for the person
+  const positions = await Position.getAggregatedByPerson(personName);
+  
+  // Sort by market value and limit
+  const topPositions = positions
+    .sort((a, b) => b.currentMarketValue - a.currentMarketValue)
+    .slice(0, parseInt(limit));
   
   res.json({
     success: true,
-    data: positions
+    aggregated: true,
+    data: topPositions
   });
 }));
 
-// Get positions with P&L summary
+// Get positions with P&L summary (aggregated)
 router.get('/pnl/:personName', asyncHandler(async (req, res) => {
   const { personName } = req.params;
   
-  const positions = await Position.find({ personName });
+  // Get aggregated positions
+  const positions = await Position.getAggregatedByPerson(personName);
   
   const pnlSummary = {
     totalOpenPnl: 0,
@@ -127,6 +163,7 @@ router.get('/pnl/:personName', asyncHandler(async (req, res) => {
   
   res.json({
     success: true,
+    aggregated: true,
     data: pnlSummary
   });
 }));

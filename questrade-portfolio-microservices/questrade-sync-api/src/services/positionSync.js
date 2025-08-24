@@ -1,14 +1,19 @@
 const Position = require('../models/Position');
+const Account = require('../models/Account');
 const questradeClient = require('./questradeClient');
 const logger = require('../utils/logger');
 
 class PositionSync {
   async syncAccountPositions(personName, accountId) {
     try {
+      // Get account details to include account type
+      const account = await Account.findOne({ accountId });
+      const accountType = account ? account.type : null;
+      
       // Get positions from Questrade
       const questradePositions = await questradeClient.getAccountPositions(personName, accountId);
       
-      logger.info(`Found ${questradePositions.length} positions for account ${accountId}`);
+      logger.info(`Found ${questradePositions.length} positions for account ${accountId} (${accountType})`);
       
       // Get existing positions for this account
       const existingPositions = await Position.find({ accountId });
@@ -32,7 +37,8 @@ class PositionSync {
               accountId,
               personName,
               symbol: qPosition.symbol,
-              symbolId: qPosition.symbolId
+              symbolId: qPosition.symbolId,
+              accountType: accountType // Set account type
             });
           }
           
@@ -48,13 +54,14 @@ class PositionSync {
           position.dayPnl = qPosition.dayPnl || 0;
           position.isRealTime = qPosition.isRealTime || false;
           position.isUnderReorg = qPosition.isUnderReorg || false;
+          position.accountType = accountType; // Update account type
           position.lastSyncedAt = new Date();
           position.lastPriceUpdate = new Date();
           
           await position.save();
           syncedPositions.push(position);
           
-          logger.debug(`Synced position ${position.symbol} for account ${accountId}`);
+          logger.debug(`Synced position ${position.symbol} for account ${accountId} (${accountType})`);
           
         } catch (error) {
           logger.error(`Error syncing position ${qPosition.symbol}:`, error);
@@ -117,6 +124,28 @@ class PositionSync {
       return summary;
     } catch (error) {
       logger.error('Failed to get portfolio summary:', error);
+      throw error;
+    }
+  }
+  
+  // New method to get aggregated positions
+  async getAggregatedPositions(filter = {}) {
+    try {
+      const positions = await Position.getAggregatedPositions(filter);
+      return positions;
+    } catch (error) {
+      logger.error('Failed to get aggregated positions:', error);
+      throw error;
+    }
+  }
+  
+  // New method to get aggregated positions for a person
+  async getAggregatedPersonPositions(personName) {
+    try {
+      const positions = await Position.getAggregatedByPerson(personName);
+      return positions;
+    } catch (error) {
+      logger.error(`Failed to get aggregated positions for ${personName}:`, error);
       throw error;
     }
   }
