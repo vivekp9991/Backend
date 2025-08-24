@@ -10,6 +10,9 @@ class PositionSync {
       const account = await Account.findOne({ accountId });
       const accountType = account ? account.type : null;
       
+      // Add debug logging
+      logger.info(`[POSITION SYNC] Account type for ${accountId}: ${accountType}`);
+
       // Get positions from Questrade
       const questradePositions = await questradeClient.getAccountPositions(personName, accountId);
       

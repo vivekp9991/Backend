@@ -170,6 +170,18 @@ positionSchema.statics.getByPerson = function(personName) {
 positionSchema.statics.getAggregatedPositions = async function(filter = {}) {
   const positions = await this.find(filter);
   
+  // Get account types from Account model
+  const Account = require('./Account');
+  const accountIds = [...new Set(positions.map(p => p.accountId))];
+  const accounts = await Account.find({ accountId: { $in: accountIds } })
+    .select('accountId type');
+  
+  // Create a map of accountId to account type
+  const accountTypeMap = new Map();
+  accounts.forEach(acc => {
+    accountTypeMap.set(acc.accountId, acc.type);
+  });
+  
   // Group positions by symbol
   const aggregatedMap = new Map();
   
@@ -193,9 +205,13 @@ positionSchema.statics.getAggregatedPositions = async function(filter = {}) {
     
     const agg = aggregatedMap.get(position.symbol);
     agg.persons.add(position.personName);
+    
+    // Get account type from the map
+    const accountType = accountTypeMap.get(position.accountId) || position.accountType || 'Unknown';
+    
     agg.accounts.push({
       accountId: position.accountId,
-      accountType: position.accountType || 'Unknown',
+      accountType: accountType,
       quantity: position.openQuantity,
       averagePrice: position.averageEntryPrice,
       cost: position.totalCost,
@@ -252,6 +268,18 @@ positionSchema.statics.getAggregatedPositions = async function(filter = {}) {
 positionSchema.statics.getAggregatedByPerson = async function(personName) {
   const positions = await this.find({ personName });
   
+  // Get account types from Account model
+  const Account = require('./Account');
+  const accountIds = [...new Set(positions.map(p => p.accountId))];
+  const accounts = await Account.find({ accountId: { $in: accountIds } })
+    .select('accountId type');
+  
+  // Create a map of accountId to account type
+  const accountTypeMap = new Map();
+  accounts.forEach(acc => {
+    accountTypeMap.set(acc.accountId, acc.type);
+  });
+  
   // Group positions by symbol
   const aggregatedMap = new Map();
   
@@ -274,9 +302,13 @@ positionSchema.statics.getAggregatedByPerson = async function(personName) {
     }
     
     const agg = aggregatedMap.get(position.symbol);
+    
+    // Get account type from the map
+    const accountType = accountTypeMap.get(position.accountId) || position.accountType || 'Unknown';
+    
     agg.accounts.push({
       accountId: position.accountId,
-      accountType: position.accountType || 'Unknown',
+      accountType: accountType,
       quantity: position.openQuantity,
       averagePrice: position.averageEntryPrice,
       cost: position.totalCost,
