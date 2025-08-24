@@ -454,9 +454,17 @@
             "url": "{{portfolio_url}}/health"
           }
         },
-        {
+       {
           "name": "Portfolio",
           "item": [
+            {
+              "name": "Get All Positions (UI Compatible)",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/portfolio/positions?viewMode=all&aggregate=true",
+                "description": "Get all positions across all persons. Supports aggregation and viewMode filtering. This endpoint is optimized for UI consumption with dividend data and market prices."
+              }
+            },
             {
               "name": "Get Portfolio Overview",
               "request": {
@@ -483,6 +491,14 @@
               "request": {
                 "method": "GET",
                 "url": "{{portfolio_url}}/api/portfolio/{{person_name}}/value"
+              }
+            },
+            {
+              "name": "Get Person Positions",
+              "request": {
+                "method": "GET",
+                "url": "{{portfolio_url}}/api/portfolio/{{person_name}}/positions?aggregate=true",
+                "description": "Get positions for a specific person. Supports aggregation across their accounts."
               }
             },
             {
