@@ -12,19 +12,19 @@ class PortfolioCalculator {
     this.syncApiUrl = config.services.syncApiUrl;
   }
 
-/**
-   * Fetch data from Sync API
-   */
+  /**
+     * Fetch data from Sync API
+     */
   async fetchFromSyncApi(endpoint, params = {}) {
     try {
       const response = await axios.get(`${this.syncApiUrl}${endpoint}`, { params });
-      
+
       // Check if response has expected structure
       if (!response.data) {
         logger.warn(`[PORTFOLIO] No data in response from ${endpoint}`);
         return { success: false, data: [] };
       }
-      
+
       return response.data;
     } catch (error) {
       // Log more detailed error information
@@ -42,7 +42,7 @@ class PortfolioCalculator {
       } else {
         logger.error(`[PORTFOLIO] Error setting up request to Sync API ${endpoint}:`, error.message);
       }
-      
+
       // Return empty but valid response structure
       return { success: false, data: [] };
     }
@@ -55,11 +55,11 @@ class PortfolioCalculator {
     try {
       const authApiUrl = config.services.authApiUrl || 'http://localhost:4001/api';
       const response = await axios.get(`${authApiUrl}/persons`);
-      
+
       if (response.data && response.data.success) {
         return response.data.data.filter(p => p.isActive);
       }
-      
+
       return [];
     } catch (error) {
       logger.error('[PORTFOLIO] Failed to fetch persons:', error.message);
@@ -73,11 +73,11 @@ class PortfolioCalculator {
   async getAllPersonsPositions(viewMode = 'all', aggregate = true) {
     try {
       logger.info(`[PORTFOLIO] Getting positions for viewMode: ${viewMode}, aggregate: ${aggregate}`);
-      
+
       // Get all active persons
       const persons = await this.getAllPersons();
       logger.info(`[PORTFOLIO] Found ${persons.length} active persons`);
-      
+
       if (persons.length === 0) {
         return [];
       }
@@ -104,7 +104,7 @@ class PortfolioCalculator {
 
           // Fetch accounts for this person
           const accountsResponse = await this.fetchFromSyncApi('/accounts/' + person.personName);
-          
+
           if (accountsResponse.success && accountsResponse.data) {
             accountsResponse.data.forEach(account => {
               accountsMap.set(account.accountId, {
@@ -131,22 +131,22 @@ class PortfolioCalculator {
     }
   }
 
-async aggregatePositions(positions, accountsMap) {
+  async aggregatePositions(positions, accountsMap) {
     try {
       // If no positions, return empty array
       if (!positions || positions.length === 0) {
         logger.info('[PORTFOLIO] No positions to aggregate');
         return [];
       }
-      
+
       logger.info(`[PORTFOLIO] Starting aggregation of ${positions.length} positions`);
-      
+
       // Group positions by symbol
       const symbolGroups = new Map();
 
       for (const position of positions) {
         const symbol = position.symbol;
-        
+
         if (!symbolGroups.has(symbol)) {
           symbolGroups.set(symbol, {
             positions: [],
@@ -162,7 +162,7 @@ async aggregatePositions(positions, accountsMap) {
         group.positions.push(position);
         group.totalQuantity = group.totalQuantity.plus(position.openQuantity || 0);
         group.totalCost = group.totalCost.plus(position.totalCost || 0);
-        
+
         const account = accountsMap.get(position.accountId);
         if (account) {
           group.accounts.add(position.accountId);
@@ -175,7 +175,7 @@ async aggregatePositions(positions, accountsMap) {
 
       // Get all unique symbols for batch price fetch
       const symbols = Array.from(symbolGroups.keys());
-      
+
       // Only fetch prices if we have symbols
       let priceData = {};
       if (symbols.length > 0) {
@@ -194,7 +194,7 @@ async aggregatePositions(positions, accountsMap) {
 
       for (const [symbol, group] of symbolGroups.entries()) {
         logger.debug(`[PORTFOLIO] Processing symbol ${symbol} with ${group.positions.length} positions`);
-        
+
         const totalQuantity = group.totalQuantity.toNumber();
         const totalCost = group.totalCost.toNumber();
         const averageEntryPrice = totalQuantity > 0 ? totalCost / totalQuantity : 0;
@@ -208,7 +208,7 @@ async aggregatePositions(positions, accountsMap) {
         const currency = symbol.includes('.TO') ? 'CAD' : 'USD';
 
         logger.debug(`[PORTFOLIO] Calculating dividend data for ${symbol}`);
-        
+
         // Calculate dividend data - wrap in try-catch to prevent failures
         let dividendData = {
           totalReceived: 0,
@@ -219,7 +219,7 @@ async aggregatePositions(positions, accountsMap) {
           currentYield: 0,
           dividendHistory: []
         };
-        
+
         try {
           logger.info(`[PORTFOLIO] Starting dividend calculation for ${symbol} with ${group.positions.length} positions`);
           dividendData = await dividendService.calculateDividendData(
@@ -263,7 +263,7 @@ async aggregatePositions(positions, accountsMap) {
           averageEntryPrice: Math.round(averageEntryPrice * 100) / 100,
           currentPrice: Math.round(currentPrice * 100) / 100,
           openPrice: Math.round(openPrice * 100) / 100,
-          dividendData: dividendData,
+          dividendData: dividendData, // This now includes paymentFrequency
           isAggregated: group.accounts.size > 1,
           sourceAccounts: Array.from(group.accountTypes),
           accountCount: group.accounts.size,
@@ -307,7 +307,7 @@ async aggregatePositions(positions, accountsMap) {
       for (const position of positions) {
         const account = accountsMap.get(position.accountId);
         const symbol = position.symbol;
-        
+
         // Get current price data
         const currentPriceData = priceData[symbol] || {};
         const currentPrice = currentPriceData.currentPrice || position.currentPrice || 0;
@@ -382,18 +382,18 @@ async aggregatePositions(positions, accountsMap) {
 
       // Calculate portfolio value
       const portfolioValue = await this.calculatePortfolioValue(personName);
-      
+
       // Calculate holdings
       const holdings = await this.calculateHoldings(personName);
-      
+
       // Get latest snapshot for day change
       const latestSnapshot = await PortfolioSnapshot.getLatest(personName);
-      
+
       let dayChange = {
         amount: 0,
         percentage: 0
       };
-      
+
       if (latestSnapshot && latestSnapshot.dayChange) {
         dayChange = latestSnapshot.dayChange;
       }
@@ -508,21 +508,21 @@ async aggregatePositions(positions, accountsMap) {
 
       const holdings = Array.from(holdingsMap.values()).map(holding => {
         const marketValueNum = holding.marketValue.toNumber();
-        const percentage = totalMarketValue.gt(0) 
-          ? holding.marketValue.div(totalMarketValue).mul(100).toNumber() 
+        const percentage = totalMarketValue.gt(0)
+          ? holding.marketValue.div(totalMarketValue).mul(100).toNumber()
           : 0;
 
         return {
           symbol: holding.symbol,
           quantity: holding.totalQuantity,
-          averagePrice: holding.totalQuantity > 0 
-            ? holding.totalCost.div(holding.totalQuantity).toNumber() 
+          averagePrice: holding.totalQuantity > 0
+            ? holding.totalCost.div(holding.totalQuantity).toNumber()
             : 0,
           marketValue: marketValueNum,
           totalCost: holding.totalCost.toNumber(),
           unrealizedPnL: holding.unrealizedPnL.toNumber(),
-          unrealizedPnLPercent: holding.totalCost.gt(0) 
-            ? holding.unrealizedPnL.div(holding.totalCost).mul(100).toNumber() 
+          unrealizedPnLPercent: holding.totalCost.gt(0)
+            ? holding.unrealizedPnL.div(holding.totalCost).mul(100).toNumber()
             : 0,
           dayPnL: holding.dayPnL.toNumber(),
           percentage,
@@ -572,17 +572,17 @@ async aggregatePositions(positions, accountsMap) {
 
       if (previousSnapshot) {
         dayChange.amount = portfolioValue.totalValueCAD - previousSnapshot.totalValueCAD;
-        dayChange.percentage = previousSnapshot.totalValueCAD > 0 
-          ? (dayChange.amount / previousSnapshot.totalValueCAD) * 100 
+        dayChange.percentage = previousSnapshot.totalValueCAD > 0
+          ? (dayChange.amount / previousSnapshot.totalValueCAD) * 100
           : 0;
       }
 
       // Calculate asset allocation (simplified)
-      const cashPercentage = portfolioValue.totalValueCAD > 0 
-        ? (portfolioValue.totalCash / portfolioValue.totalValueCAD) * 100 
+      const cashPercentage = portfolioValue.totalValueCAD > 0
+        ? (portfolioValue.totalCash / portfolioValue.totalValueCAD) * 100
         : 0;
-      const stocksPercentage = portfolioValue.totalValueCAD > 0 
-        ? (portfolioValue.totalMarketValue / portfolioValue.totalValueCAD) * 100 
+      const stocksPercentage = portfolioValue.totalValueCAD > 0
+        ? (portfolioValue.totalMarketValue / portfolioValue.totalValueCAD) * 100
         : 0;
 
       // Create snapshot with properly formatted accountBreakdown
@@ -605,18 +605,18 @@ async aggregatePositions(positions, accountsMap) {
           accountId: String(acc.accountId),
           type: String(acc.type || 'Unknown'),
           value: Number(acc.summary?.totalEquityCAD || 0),
-          percentage: portfolioValue.totalValueCAD > 0 
+          percentage: portfolioValue.totalValueCAD > 0
             ? Number(((acc.summary?.totalEquityCAD || 0) / portfolioValue.totalValueCAD) * 100)
             : 0
         })),
         assetAllocation: {
-          stocks: { 
-            value: portfolioValue.totalMarketValue, 
-            percentage: stocksPercentage 
+          stocks: {
+            value: portfolioValue.totalMarketValue,
+            percentage: stocksPercentage
           },
-          cash: { 
-            value: portfolioValue.totalCash, 
-            percentage: cashPercentage 
+          cash: {
+            value: portfolioValue.totalCash,
+            percentage: cashPercentage
           },
           bonds: { value: 0, percentage: 0 },
           other: { value: 0, percentage: 0 }

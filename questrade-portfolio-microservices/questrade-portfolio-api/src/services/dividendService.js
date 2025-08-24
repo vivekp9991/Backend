@@ -104,7 +104,7 @@ class DividendService {
   }
 
   /**
-   * Calculate dividend data for a specific symbol
+   * Calculate dividend data for a specific symbol (UPDATED)
    */
   async calculateDividendData(symbol, positions, currentPrice) {
     try {
@@ -131,6 +131,7 @@ class DividendService {
       
       // Fetch dividend activities for all persons (with error handling)
       const allDividendActivities = [];
+      const activityMap = new Map(); // To track unique dividends and aggregate them
       
       for (const personName of personNames) {
         try {
@@ -139,6 +140,35 @@ class DividendService {
           
           if (activities && activities.length > 0) {
             logger.info(`[DIVIDEND] Found ${activities.length} activities for ${personName} - ${symbol}`);
+            
+            // Process activities and aggregate by date
+            activities.forEach(activity => {
+              const dateKey = moment(activity.transactionDate).format('YYYY-MM-DD');
+              const amount = Math.abs(activity.netAmount || activity.grossAmount || 0);
+              
+              if (activityMap.has(dateKey)) {
+                // If we already have a dividend for this date, add to it
+                const existing = activityMap.get(dateKey);
+                existing.amount += amount;
+                existing.accounts.push({
+                  personName: personName,
+                  accountId: activity.accountId,
+                  amount: amount
+                });
+              } else {
+                // New dividend date
+                activityMap.set(dateKey, {
+                  date: activity.transactionDate,
+                  amount: amount,
+                  accounts: [{
+                    personName: personName,
+                    accountId: activity.accountId,
+                    amount: amount
+                  }]
+                });
+              }
+            });
+            
             allDividendActivities.push(...activities);
           } else {
             logger.debug(`[DIVIDEND] No activities found for ${personName} - ${symbol}`);
@@ -150,24 +180,19 @@ class DividendService {
       }
 
       logger.info(`[DIVIDEND] Total dividend activities found for ${symbol}: ${allDividendActivities.length}`);
+      logger.info(`[DIVIDEND] Unique dividend dates: ${activityMap.size}`);
 
       // If no dividend data available, return empty structure
-      if (allDividendActivities.length === 0) {
+      if (activityMap.size === 0) {
         logger.debug(`[DIVIDEND] No dividend activities found for ${symbol}`);
         return this.getEmptyDividendData();
       }
 
-      // Calculate total dividends received
-      const totalReceived = allDividendActivities.reduce((sum, activity) => {
-        const amount = Math.abs(activity.netAmount || activity.grossAmount || 0);
-        logger.debug(`[DIVIDEND] Activity amount for ${symbol}:`, {
-          date: activity.transactionDate,
-          netAmount: activity.netAmount,
-          grossAmount: activity.grossAmount,
-          amount: amount
-        });
-        return sum + amount;
-      }, 0);
+      // Calculate total dividends received (aggregated)
+      let totalReceived = 0;
+      activityMap.forEach(dividend => {
+        totalReceived += dividend.amount;
+      });
 
       logger.info(`[DIVIDEND] Total dividends received for ${symbol}: ${totalReceived}`);
 
@@ -193,17 +218,64 @@ class DividendService {
       
       logger.debug(`[DIVIDEND] Average cost per share for ${symbol}: ${avgCostPerShare}`);
 
-      // Group dividends by period
-      const dividendsByPeriod = this.groupDividendsByPeriod(allDividendActivities);
+      // Calculate payment frequency and amounts (UPDATED LOGIC)
+      const dividendDates = Array.from(activityMap.values())
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
       
-      // Calculate annual dividend (last 12 months)
-      const annualDividend = this.calculateAnnualDividend(allDividendActivities);
-      const annualDividendPerShare = totalShares > 0 ? annualDividend / totalShares : 0;
+      // Get the most recent dividend payment for per-share calculation
+      const mostRecentDividend = dividendDates[dividendDates.length - 1];
+      const mostRecentDividendPerShare = totalShares > 0 ? 
+        mostRecentDividend.amount / totalShares : 0;
+      
+      logger.info(`[DIVIDEND] Most recent dividend for ${symbol}: ${mostRecentDividend.amount} on ${moment(mostRecentDividend.date).format('YYYY-MM-DD')}`);
+      logger.info(`[DIVIDEND] Most recent dividend per share: ${mostRecentDividendPerShare}`);
+      
+      // Determine payment frequency
+      let paymentFrequency = 12; // Default to monthly
+      let monthlyDividendPerShare = mostRecentDividendPerShare; // Assume most recent payment is the regular payment
+      
+      if (dividendDates.length >= 2) {
+        // Calculate average days between payments
+        let totalDaysBetween = 0;
+        let gapCount = 0;
+        
+        for (let i = 1; i < dividendDates.length; i++) {
+          const daysBetween = moment(dividendDates[i].date).diff(moment(dividendDates[i-1].date), 'days');
+          if (daysBetween > 0) {
+            totalDaysBetween += daysBetween;
+            gapCount++;
+          }
+        }
+        
+        if (gapCount > 0) {
+          const avgDaysBetween = totalDaysBetween / gapCount;
+          logger.info(`[DIVIDEND] Average days between payments: ${avgDaysBetween}`);
+          
+          // Determine frequency based on average days between payments
+          if (avgDaysBetween <= 35) {
+            paymentFrequency = 12; // Monthly
+            monthlyDividendPerShare = mostRecentDividendPerShare;
+          } else if (avgDaysBetween <= 100) {
+            paymentFrequency = 4; // Quarterly
+            monthlyDividendPerShare = mostRecentDividendPerShare / 3; // Convert quarterly to monthly
+          } else if (avgDaysBetween <= 200) {
+            paymentFrequency = 2; // Semi-annual
+            monthlyDividendPerShare = mostRecentDividendPerShare / 6; // Convert semi-annual to monthly
+          } else {
+            paymentFrequency = 1; // Annual
+            monthlyDividendPerShare = mostRecentDividendPerShare / 12; // Convert annual to monthly
+          }
+        }
+      }
+      
+      logger.info(`[DIVIDEND] Detected payment frequency: ${paymentFrequency} times per year`);
+      logger.info(`[DIVIDEND] Monthly dividend per share: ${monthlyDividendPerShare}`);
+      
+      // Calculate annual dividend based on actual payment frequency
+      const annualDividendPerShare = mostRecentDividendPerShare * paymentFrequency;
+      const annualDividend = annualDividendPerShare * totalShares;
       
       logger.info(`[DIVIDEND] Annual dividend for ${symbol}: ${annualDividend}, per share: ${annualDividendPerShare}`);
-      
-      // Calculate monthly dividend per share (average of last 12 months)
-      const monthlyDividendPerShare = annualDividendPerShare / 12;
       
       // Calculate yields
       const yieldOnCost = avgCostPerShare > 0 ? (annualDividendPerShare / avgCostPerShare) * 100 : 0;
@@ -211,8 +283,15 @@ class DividendService {
       
       logger.info(`[DIVIDEND] Yields for ${symbol} - On Cost: ${yieldOnCost}%, Current: ${currentYield}%`);
       
-      // Get dividend history (last 10 payments)
-      const dividendHistory = this.formatDividendHistory(allDividendActivities, 10);
+      // Format dividend history (aggregated by date)
+      const dividendHistory = dividendDates
+        .slice(-10) // Last 10 payments
+        .reverse() // Most recent first
+        .map(dividend => ({
+          date: moment(dividend.date).format('YYYY-MM-DD'),
+          amount: Math.round(dividend.amount * 100) / 100,
+          accounts: dividend.accounts.length // Show how many accounts received dividends
+        }));
 
       const result = {
         totalReceived: Math.round(totalReceived * 100) / 100,
@@ -221,7 +300,8 @@ class DividendService {
         annualDividendPerShare: Math.round(annualDividendPerShare * 100) / 100,
         yieldOnCost: Math.round(yieldOnCost * 100) / 100,
         currentYield: Math.round(currentYield * 100) / 100,
-        dividendHistory
+        dividendHistory,
+        paymentFrequency // Add this for transparency
       };
 
       logger.info(`[DIVIDEND] Final dividend data for ${symbol}:`, result);
@@ -247,82 +327,9 @@ class DividendService {
       annualDividendPerShare: 0,
       yieldOnCost: 0,
       currentYield: 0,
-      dividendHistory: []
+      dividendHistory: [],
+      paymentFrequency: 0
     };
-  }
-
-  /**
-   * Group dividends by period for analysis
-   */
-  groupDividendsByPeriod(activities) {
-    const grouped = {};
-    
-    activities.forEach(activity => {
-      const date = moment(activity.transactionDate);
-      const yearMonth = date.format('YYYY-MM');
-      
-      if (!grouped[yearMonth]) {
-        grouped[yearMonth] = {
-          period: yearMonth,
-          total: 0,
-          count: 0,
-          activities: []
-        };
-      }
-      
-      const amount = Math.abs(activity.netAmount || activity.grossAmount || 0);
-      grouped[yearMonth].total += amount;
-      grouped[yearMonth].count++;
-      grouped[yearMonth].activities.push(activity);
-    });
-    
-    logger.debug(`[DIVIDEND] Grouped dividends by period:`, Object.keys(grouped));
-    
-    return grouped;
-  }
-
-  /**
-   * Calculate annual dividend (last 12 months)
-   */
-  calculateAnnualDividend(activities) {
-    const twelveMonthsAgo = moment().subtract(12, 'months');
-    
-    logger.debug(`[DIVIDEND] Calculating annual dividend from ${twelveMonthsAgo.format('YYYY-MM-DD')}`);
-    
-    const recentDividends = activities.filter(activity => {
-      const activityDate = moment(activity.transactionDate);
-      return activityDate.isAfter(twelveMonthsAgo);
-    });
-    
-    logger.debug(`[DIVIDEND] Found ${recentDividends.length} dividends in last 12 months`);
-    
-    const total = recentDividends.reduce((sum, activity) => {
-      const amount = Math.abs(activity.netAmount || activity.grossAmount || 0);
-      return sum + amount;
-    }, 0);
-    
-    logger.debug(`[DIVIDEND] Total annual dividend: ${total}`);
-    
-    return total;
-  }
-
-  /**
-   * Format dividend history for response
-   */
-  formatDividendHistory(activities, limit = 10) {
-    // Sort by date descending and take the most recent
-    const sorted = activities
-      .sort((a, b) => new Date(b.transactionDate) - new Date(a.transactionDate))
-      .slice(0, limit);
-    
-    const history = sorted.map(activity => ({
-      date: moment(activity.transactionDate).format('YYYY-MM-DD'),
-      amount: Math.round(Math.abs(activity.netAmount || activity.grossAmount || 0) * 100) / 100
-    }));
-    
-    logger.debug(`[DIVIDEND] Formatted ${history.length} dividend history entries`);
-    
-    return history;
   }
 
   /**
