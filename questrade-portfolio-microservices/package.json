@@ -1,0 +1,38 @@
+{
+  "name": "questrade-portfolio-microservices",
+  "version": "1.0.0",
+  "description": "Questrade Portfolio Tracker - Microservices Architecture",
+  "private": true,
+  "scripts": {
+    "install:all": "npm run install:auth && npm run install:sync && npm run install:portfolio && npm run install:market",
+    "install:auth": "cd questrade-auth-api && npm install",
+    "install:sync": "cd questrade-sync-api && npm install",
+    "install:portfolio": "cd questrade-portfolio-api && npm install",
+    "install:market": "cd questrade-market-api && npm install",
+    "postinstall": "npm run install:all",
+    
+    "start": "npm run start:all",
+    "start:all": "concurrently -n \"AUTH,SYNC,PORTFOLIO,MARKET\" -c \"blue,green,yellow,magenta\" \"npm run start:auth\" \"npm run start:sync\" \"npm run start:portfolio\" \"npm run start:market\"",
+    "start:auth": "cd questrade-auth-api && npm start",
+    "start:sync": "cd questrade-sync-api && npm start",
+    "start:portfolio": "cd questrade-portfolio-api && npm start",
+    "start:market": "cd questrade-market-api && npm start",
+    
+    "dev": "npm run dev:all",
+    "dev:all": "concurrently -n \"AUTH,SYNC,PORTFOLIO,MARKET\" -c \"blue,green,yellow,magenta\" \"npm run dev:auth\" \"npm run dev:sync\" \"npm run dev:portfolio\" \"npm run dev:market\"",
+    "dev:auth": "cd questrade-auth-api && npm run dev",
+    "dev:sync": "cd questrade-sync-api && npm run dev",
+    "dev:portfolio": "cd questrade-portfolio-api && npm run dev",
+    "dev:market": "cd questrade-market-api && npm run dev",
+    
+    "stop": "npm run stop:all",
+    "stop:all": "pkill -f 'node.*questrade' || echo 'Services stopped'"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}
